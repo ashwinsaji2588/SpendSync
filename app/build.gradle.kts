@@ -1,5 +1,4 @@
 import java.util.Properties
-import java.io.FileInputStream
 
 plugins {
     alias(libs.plugins.android.application)
@@ -11,19 +10,19 @@ if (file("google-services.json").exists()) {
     apply(plugin = "com.google.gms.google-services")
 }
 
+val localProperties = Properties().apply {
+    val localPropertiesFile = rootProject.file("local.properties")
+    if (localPropertiesFile.exists()) {
+        localPropertiesFile.inputStream().use { load(it) }
+    }
+}
+val geminiApiKey: String = localProperties.getProperty("GEMINI_API_KEY") ?: ""
+
 android {
     namespace = "com.example.expensetracker"
     compileSdk {
         version = release(37)
     }
-
-    val localProperties = Properties().apply {
-        val localPropertiesFile = rootProject.file("local.properties")
-        if (localPropertiesFile.exists()) {
-            localPropertiesFile.inputStream().use { load(it) }
-        }
-    }
-    val geminiApiKey = localProperties.getProperty("GEMINI_API_KEY") ?: ""
 
     defaultConfig {
         applicationId = "com.example.expensetracker"
