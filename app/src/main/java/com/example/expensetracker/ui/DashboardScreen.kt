@@ -1,0 +1,2005 @@
+package com.example.expensetracker.ui
+
+import android.Manifest
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.provider.Settings
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountBox
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.ShoppingCart
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DrawerValue
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuAnchorType
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalDrawerSheet
+import androidx.compose.material3.ModalNavigationDrawer
+import androidx.compose.material3.NavigationDrawerItem
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.rememberDrawerState
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.core.content.ContextCompat
+import com.example.expensetracker.data.Account
+import com.example.expensetracker.data.AccountType
+import com.example.expensetracker.data.Category
+import com.example.expensetracker.data.CategoryRule
+import com.example.expensetracker.data.TransactionType
+import com.example.expensetracker.data.TransactionWithDetails
+import kotlinx.coroutines.launch
+import java.text.NumberFormat
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun DashboardScreen(
+    viewModel: MainViewModel,
+    onSignOut: () -> Unit = {}
+) {
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
+
+    val transactions by viewModel.allTransactions.collectAsState()
+    val spendingSummary by viewModel.monthlySpendingSummary.collectAsState()
+    val categoryBreakdown by viewModel.categoryBreakdown.collectAsState()
+    val selectedMonth by viewModel.selectedMonth.collectAsState()
+    val selectedAccount by viewModel.selectedAccount.collectAsState()
+    val allAccounts by viewModel.allAccounts.collectAsState()
+    val allCategories by viewModel.allCategories.collectAsState()
+    val allRules by viewModel.allRules.collectAsState()
+    val pendingSettlements by viewModel.pendingSettlements.collectAsState()
+    val totalPendingSettlements by viewModel.totalPendingSettlements.collectAsState()
+    val isScanning by viewModel.isScanning.collectAsState()
+    val scanMessage by viewModel.scanMessage.collectAsState()
+
+    var showManualAddDialog by remember { mutableStateOf(false) }
+    var showRulesManagerDialog by remember { mutableStateOf(false) }
+    var showSettlementsDialog by remember { mutableStateOf(false) }
+    var showSupportDialog by remember { mutableStateOf(false) }
+    var selectedTransactionForEdit by remember { mutableStateOf<TransactionWithDetails?>(null) }
+    var selectedCategoryForDrillDown by remember { mutableStateOf<CategoryBreakdownItem?>(null) }
+
+    val requiredPermissions = remember {
+        arrayOf(
+            Manifest.permission.RECEIVE_SMS,
+            Manifest.permission.READ_SMS
+        )
+    }
+
+    var hasPermissions by remember {
+        mutableStateOf(
+            requiredPermissions.all { perm ->
+                ContextCompat.checkSelfPermission(context, perm) == PackageManager.PERMISSION_GRANTED
+            }
+        )
+    }
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { resultsMap ->
+        val allGranted = requiredPermissions.all { resultsMap[it] == true }
+        hasPermissions = allGranted
+        viewModel.onPermissionsResult(allGranted)
+    }
+
+    LaunchedEffect(Unit) {
+        if (!hasPermissions) {
+            permissionLauncher.launch(requiredPermissions)
+        }
+    }
+
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        drawerContent = {
+            ModalDrawerSheet(
+                modifier = Modifier.width(300.dp)
+            ) {
+                SidebarContent(
+                    accounts = allAccounts,
+                    selectedAccount = selectedAccount,
+                    pendingSettlementsCount = pendingSettlements.size,
+                    totalPendingAmount = totalPendingSettlements,
+                    onAccountSelected = { account ->
+                        viewModel.selectAccount(account)
+                        coroutineScope.launch { drawerState.close() }
+                    },
+                    onOpenSettlements = {
+                        showSettlementsDialog = true
+                        coroutineScope.launch { drawerState.close() }
+                    },
+                    onOpenRules = {
+                        showRulesManagerDialog = true
+                        coroutineScope.launch { drawerState.close() }
+                    },
+                    onOpenSupport = {
+                        showSupportDialog = true
+                        coroutineScope.launch { drawerState.close() }
+                    },
+                    onOpenNotificationSettings = {
+                        context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+                    },
+                    onSignOut = {
+                        coroutineScope.launch { drawerState.close() }
+                        onSignOut()
+                    }
+                )
+            }
+        }
+    ) {
+        Scaffold(
+            topBar = {
+                TopAppBar(
+                    title = {
+                        Column {
+                            Text(
+                                text = "SpendSync",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 19.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = selectedAccount?.name ?: "All Accounts",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    },
+                    navigationIcon = {
+                        IconButton(onClick = { coroutineScope.launch { drawerState.open() } }) {
+                            Icon(imageVector = Icons.Default.Menu, contentDescription = "Open Sidebar")
+                        }
+                    },
+                    actions = {
+                        // Help / Support action button
+                        IconButton(onClick = { showSupportDialog = true }) {
+                            Icon(
+                                imageVector = Icons.Default.Info,
+                                contentDescription = "Help & Support",
+                                tint = MaterialTheme.colorScheme.onBackground
+                            )
+                        }
+
+                        if (isScanning) {
+                            CircularProgressIndicator(
+                                modifier = Modifier
+                                    .size(24.dp)
+                                    .padding(end = 8.dp),
+                                strokeWidth = 2.dp,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        } else {
+                            IconButton(
+                                onClick = {
+                                    if (hasPermissions) {
+                                        viewModel.scanHistoricalSms(force = true)
+                                    } else {
+                                        permissionLauncher.launch(requiredPermissions)
+                                    }
+                                }
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Refresh,
+                                    contentDescription = "Scan SMS Inbox",
+                                    tint = MaterialTheme.colorScheme.onBackground
+                                )
+                            }
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = MaterialTheme.colorScheme.background,
+                        titleContentColor = MaterialTheme.colorScheme.onBackground
+                    )
+                )
+            },
+            floatingActionButton = {
+                FloatingActionButton(
+                    onClick = { showManualAddDialog = true },
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary
+                ) {
+                    Icon(imageVector = Icons.Default.Add, contentDescription = "Add Transaction")
+                }
+            }
+        ) { paddingValues ->
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(paddingValues)
+                    .padding(horizontal = 16.dp)
+            ) {
+                // Scanning Progress Indicator
+                if (isScanning) {
+                    LinearProgressIndicator(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 8.dp),
+                        color = MaterialTheme.colorScheme.primary,
+                        trackColor = MaterialTheme.colorScheme.primaryContainer
+                    )
+                }
+
+                // Month Selector Filter
+                MonthSelectorRow(
+                    months = viewModel.availableMonths,
+                    selectedMonth = selectedMonth,
+                    onMonthSelected = { viewModel.selectMonth(it) }
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Permission Banner if missing
+                AnimatedVisibility(
+                    visible = !hasPermissions,
+                    enter = fadeIn() + slideInVertically(),
+                    exit = fadeOut() + slideOutVertically()
+                ) {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 12.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.9f)
+                        ),
+                        shape = RoundedCornerShape(16.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(14.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Info,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onErrorContainer,
+                                    modifier = Modifier.size(28.dp)
+                                )
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Column {
+                                    Text(
+                                        text = "SMS Permissions Required",
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onErrorContainer,
+                                        fontSize = 13.sp
+                                    )
+                                    Text(
+                                        text = "Allow reading SMS to auto-track bank expenses.",
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.85f)
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Button(
+                                onClick = { permissionLauncher.launch(requiredPermissions) },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.error
+                                ),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Text("Grant", fontSize = 12.sp)
+                            }
+                        }
+                    }
+                }
+
+                // Scan feedback banner
+                AnimatedVisibility(
+                    visible = scanMessage != null,
+                    enter = fadeIn(),
+                    exit = fadeOut()
+                ) {
+                    scanMessage?.let { msg ->
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = 12.dp),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.secondaryContainer
+                            ),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(
+                                    modifier = Modifier.weight(1f),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Check,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = msg,
+                                        fontSize = 12.sp,
+                                        color = MaterialTheme.colorScheme.onSecondaryContainer
+                                    )
+                                }
+                                TextButton(onClick = { viewModel.clearScanMessage() }) {
+                                    Text("Dismiss", fontSize = 11.sp)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    // Net & Gross Monthly Expenses Card
+                    item {
+                        MonthlyExpensesCard(
+                            summary = spendingSummary,
+                            monthLabel = selectedMonth.label,
+                            accountLabel = selectedAccount?.name ?: "All Accounts"
+                        )
+                    }
+
+                    // Pending Settlements Quick Card (if any pending)
+                    if (pendingSettlements.isNotEmpty()) {
+                        item {
+                            PendingSettlementsBanner(
+                                pendingCount = pendingSettlements.size,
+                                totalAmount = totalPendingSettlements,
+                                onClick = { showSettlementsDialog = true }
+                            )
+                        }
+                    }
+
+                    // Category Breakdown Section (Clickable drill-down)
+                    if (categoryBreakdown.isNotEmpty()) {
+                        item {
+                            CategoryBreakdownCard(
+                                breakdownItems = categoryBreakdown,
+                                onCategoryClick = { item ->
+                                    selectedCategoryForDrillDown = item
+                                }
+                            )
+                        }
+                    }
+
+                    // Transactions Header
+                    item {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Transactions",
+                                fontSize = 18.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onBackground
+                            )
+                            Text(
+                                text = "${transactions.size} items",
+                                fontSize = 13.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    // Transactions List
+                    if (transactions.isEmpty()) {
+                        item {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 36.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Icon(
+                                        imageVector = Icons.Default.DateRange,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(52.dp),
+                                        tint = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
+                                    )
+                                    Spacer(modifier = Modifier.height(10.dp))
+                                    Text(
+                                        text = "No transactions found",
+                                        fontWeight = FontWeight.Medium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        fontSize = 14.sp
+                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        text = "Add manual expenses or sync bank SMS",
+                                        fontSize = 12.sp,
+                                        color = MaterialTheme.colorScheme.outline
+                                    )
+                                }
+                            }
+                        }
+                    } else {
+                        items(
+                            items = transactions,
+                            key = { it.transaction.id }
+                        ) { item ->
+                            TransactionItemCard(
+                                item = item,
+                                onClick = { selectedTransactionForEdit = item }
+                            )
+                        }
+                    }
+
+                    item {
+                        Spacer(modifier = Modifier.height(60.dp))
+                    }
+                }
+            }
+        }
+    }
+
+    // Category Drill-Down Dialog
+    selectedCategoryForDrillDown?.let { categoryItem ->
+        val filteredCategoryTransactions = transactions.filter {
+            it.category?.id == categoryItem.categoryId || it.category?.name.equals(categoryItem.categoryName, ignoreCase = true)
+        }
+        CategoryDrillDownDialog(
+            categoryItem = categoryItem,
+            transactions = filteredCategoryTransactions,
+            monthLabel = selectedMonth.label,
+            onDismiss = { selectedCategoryForDrillDown = null },
+            onTransactionClick = { item ->
+                selectedCategoryForDrillDown = null
+                selectedTransactionForEdit = item
+            }
+        )
+    }
+
+    // Support & Help Dialog
+    if (showSupportDialog) {
+        SupportHelpDialog(onDismiss = { showSupportDialog = false })
+    }
+
+    // Manual Entry Dialog
+    if (showManualAddDialog) {
+        ManualEntryDialog(
+            accounts = allAccounts,
+            categories = allCategories,
+            onDismiss = { showManualAddDialog = false },
+            onSave = { amount, merchant, type, categoryId, accountId, isSplit, reimbursementAmount, peerName ->
+                viewModel.addManualTransaction(
+                    amount = amount,
+                    merchantName = merchant,
+                    type = type,
+                    categoryId = categoryId,
+                    accountId = accountId,
+                    isSplit = isSplit,
+                    reimbursementAmount = reimbursementAmount,
+                    peerName = peerName
+                )
+                showManualAddDialog = false
+            }
+        )
+    }
+
+    // Edit Transaction Category & Auto-Learning Rule Dialog
+    selectedTransactionForEdit?.let { transactionDetails ->
+        EditTransactionCategoryDialog(
+            transactionDetails = transactionDetails,
+            categories = allCategories,
+            onDismiss = { selectedTransactionForEdit = null },
+            onSave = { newCategoryId, saveRule, keyword ->
+                viewModel.updateTransactionCategory(
+                    transactionId = transactionDetails.transaction.id,
+                    newCategoryId = newCategoryId,
+                    saveRule = saveRule,
+                    merchantKeyword = keyword
+                )
+                selectedTransactionForEdit = null
+            }
+        )
+    }
+
+    // Pending Settlements Dialog / List
+    if (showSettlementsDialog) {
+        PendingSettlementsDialog(
+            settlements = pendingSettlements,
+            onDismiss = { showSettlementsDialog = false },
+            onMarkSettled = { id -> viewModel.markSettled(id, true) }
+        )
+    }
+
+    // Category Rules Manager Dialog
+    if (showRulesManagerDialog) {
+        CategoryRulesDialog(
+            rules = allRules,
+            categories = allCategories,
+            onDismiss = { showRulesManagerDialog = false },
+            onDeleteRule = { rule -> viewModel.deleteCategoryRule(rule) },
+            onAddRule = { keyword, categoryId -> viewModel.saveCategoryRule(keyword, categoryId) }
+        )
+    }
+}
+
+@Composable
+fun SidebarContent(
+    accounts: List<Account>,
+    selectedAccount: Account?,
+    pendingSettlementsCount: Int,
+    totalPendingAmount: Double,
+    onAccountSelected: (Account?) -> Unit,
+    onOpenSettlements: () -> Unit,
+    onOpenRules: () -> Unit,
+    onOpenSupport: () -> Unit,
+    onOpenNotificationSettings: () -> Unit,
+    onSignOut: () -> Unit
+) {
+    val indianLocale = remember { Locale.Builder().setLanguage("en").setRegion("IN").build() }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(CircleShape)
+                    .background(
+                        brush = Brush.linearGradient(
+                            colors = listOf(Color(0xFF4A00E0), Color(0xFF8E2DE2))
+                        )
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.AccountBox,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+            Spacer(modifier = Modifier.width(10.dp))
+            Column {
+                Text(
+                    text = "SpendSync",
+                    fontSize = 19.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    text = "Smart Expense Manager",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(18.dp))
+
+        // All Accounts item
+        NavigationDrawerItem(
+            label = { Text("All Accounts", fontWeight = if (selectedAccount == null) FontWeight.Bold else FontWeight.Normal) },
+            selected = selectedAccount == null,
+            onClick = { onAccountSelected(null) },
+            icon = { Icon(Icons.Default.AccountBox, contentDescription = null) },
+            modifier = Modifier.padding(vertical = 2.dp)
+        )
+
+        accounts.forEach { account ->
+            val isSelected = selectedAccount?.id == account.id
+            val icon = when (account.type) {
+                AccountType.CREDIT_CARD -> Icons.Default.ShoppingCart
+                AccountType.CASH -> Icons.Default.Person
+                else -> Icons.Default.AccountBox
+            }
+            NavigationDrawerItem(
+                label = {
+                    Column {
+                        Text(account.name, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal)
+                        Text(account.type.name.replace("_", " "), fontSize = 10.sp, color = MaterialTheme.colorScheme.outline)
+                    }
+                },
+                selected = isSelected,
+                onClick = { onAccountSelected(account) },
+                icon = { Icon(icon, contentDescription = null) },
+                modifier = Modifier.padding(vertical = 2.dp)
+            )
+        }
+
+        Spacer(modifier = Modifier.height(14.dp))
+        HorizontalDivider()
+        Spacer(modifier = Modifier.height(14.dp))
+
+        // Pending Settlements section
+        NavigationDrawerItem(
+            label = {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Owed to Me")
+                    if (pendingSettlementsCount > 0) {
+                        Text(
+                            text = "₹${String.format(indianLocale, "%.0f", totalPendingAmount)}",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
+            },
+            selected = false,
+            onClick = onOpenSettlements,
+            icon = { Icon(Icons.Default.Share, contentDescription = null) }
+        )
+
+        // Auto-Rules item
+        NavigationDrawerItem(
+            label = { Text("Auto-Learning Rules") },
+            selected = false,
+            onClick = onOpenRules,
+            icon = { Icon(Icons.Default.Edit, contentDescription = null) }
+        )
+
+        // GPay Notification Listener Settings
+        NavigationDrawerItem(
+            label = { Text("UPI Split Listener") },
+            selected = false,
+            onClick = onOpenNotificationSettings,
+            icon = { Icon(Icons.Default.Notifications, contentDescription = null) }
+        )
+
+        // Support & Help
+        NavigationDrawerItem(
+            label = { Text("Help & Support") },
+            selected = false,
+            onClick = onOpenSupport,
+            icon = { Icon(Icons.Default.Info, contentDescription = null) }
+        )
+
+        Spacer(modifier = Modifier.weight(1f))
+
+        // Sign Out Button
+        TextButton(
+            onClick = onSignOut,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("Sign Out", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.SemiBold)
+        }
+    }
+}
+
+@Composable
+fun MonthlyExpensesCard(
+    summary: MonthlySpendingSummary,
+    monthLabel: String,
+    accountLabel: String
+) {
+    val indianLocale = remember { Locale.Builder().setLanguage("en").setRegion("IN").build() }
+    val formattedNet = remember(summary.netExpense) {
+        "₹${String.format(indianLocale, "%.2f", summary.netExpense)}"
+    }
+    val formattedGross = remember(summary.grossExpense) {
+        "₹${String.format(indianLocale, "%.2f", summary.grossExpense)}"
+    }
+    val formattedReimbursement = remember(summary.totalReimbursements) {
+        "₹${String.format(indianLocale, "%.2f", summary.totalReimbursements)}"
+    }
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(170.dp),
+        shape = RoundedCornerShape(22.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    brush = Brush.linearGradient(
+                        colors = listOf(
+                            Color(0xFF4A00E0),
+                            Color(0xFF8E2DE2)
+                        )
+                    )
+                )
+                .padding(18.dp)
+        ) {
+            Column(
+                modifier = Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Net Spent ($monthLabel)",
+                        color = Color.White.copy(alpha = 0.9f),
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Text(
+                        text = accountLabel,
+                        color = Color.White.copy(alpha = 0.75f),
+                        fontSize = 11.sp
+                    )
+                }
+
+                Text(
+                    text = formattedNet,
+                    color = Color.White,
+                    fontSize = 32.sp,
+                    fontWeight = FontWeight.Bold
+                )
+
+                // Sub-breakdown if split reimbursements exist
+                if (summary.totalReimbursements > 0) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = "Gross: $formattedGross",
+                            color = Color.White.copy(alpha = 0.8f),
+                            fontSize = 11.sp
+                        )
+                        Text(
+                            text = "Reimbursed: -$formattedReimbursement",
+                            color = Color(0xFF81C784),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                } else {
+                    Text(
+                        text = "Auto-tracked from Bank SMS & Cash entries",
+                        color = Color.White.copy(alpha = 0.75f),
+                        fontSize = 11.sp
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun PendingSettlementsBanner(
+    pendingCount: Int,
+    totalAmount: Double,
+    onClick: () -> Unit
+) {
+    val indianLocale = remember { Locale.Builder().setLanguage("en").setRegion("IN").build() }
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() },
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.85f)
+        ),
+        shape = RoundedCornerShape(14.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Default.Share,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onTertiaryContainer,
+                    modifier = Modifier.size(22.dp)
+                )
+                Spacer(modifier = Modifier.width(10.dp))
+                Column {
+                    Text(
+                        text = "$pendingCount Active Split${if (pendingCount > 1) "s" else ""}",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onTertiaryContainer
+                    )
+                    Text(
+                        text = "Money owed to you",
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.8f)
+                    )
+                }
+            }
+            Text(
+                text = "₹${String.format(indianLocale, "%.2f", totalAmount)}",
+                fontWeight = FontWeight.Bold,
+                fontSize = 15.sp,
+                color = MaterialTheme.colorScheme.onTertiaryContainer
+            )
+        }
+    }
+}
+
+@Composable
+fun CategoryBreakdownCard(
+    breakdownItems: List<CategoryBreakdownItem>,
+    onCategoryClick: (CategoryBreakdownItem) -> Unit
+) {
+    val indianLocale = remember { Locale.Builder().setLanguage("en").setRegion("IN").build() }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Category Breakdown",
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    text = "Tap to view list",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.outline
+                )
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+
+            breakdownItems.forEach { item ->
+                val categoryColor = getCategoryColor(item.categoryName)
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable { onCategoryClick(item) }
+                        .padding(vertical = 6.dp, horizontal = 4.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(10.dp)
+                                    .clip(CircleShape)
+                                    .background(categoryColor)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = item.categoryName,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "(${String.format(indianLocale, "%.1f", item.percentage)}%)",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.outline
+                            )
+                        }
+                        Text(
+                            text = "₹${String.format(indianLocale, "%.2f", item.totalAmount)}",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    LinearProgressIndicator(
+                        progress = { (item.percentage / 100f).coerceIn(0f, 1f) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(6.dp)
+                            .clip(RoundedCornerShape(3.dp)),
+                        color = categoryColor,
+                        trackColor = categoryColor.copy(alpha = 0.15f),
+                        strokeCap = StrokeCap.Round
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun CategoryDrillDownDialog(
+    categoryItem: CategoryBreakdownItem,
+    transactions: List<TransactionWithDetails>,
+    monthLabel: String,
+    onDismiss: () -> Unit,
+    onTransactionClick: (TransactionWithDetails) -> Unit
+) {
+    val indianLocale = remember { Locale.Builder().setLanguage("en").setRegion("IN").build() }
+    val categoryColor = getCategoryColor(categoryItem.categoryName)
+
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = RoundedCornerShape(24.dp),
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 6.dp,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(480.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(20.dp)
+            ) {
+                // Header
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(16.dp)
+                                .clip(CircleShape)
+                                .background(categoryColor)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column {
+                            Text(
+                                text = categoryItem.categoryName,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 18.sp
+                            )
+                            Text(
+                                text = "$monthLabel • ${transactions.size} transactions",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.Default.Close, contentDescription = "Close")
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Total Spend Banner
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = categoryColor.copy(alpha = 0.15f)
+                    ),
+                    shape = RoundedCornerShape(14.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(14.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Total Spent",
+                            fontWeight = FontWeight.Medium,
+                            fontSize = 14.sp
+                        )
+                        Text(
+                            text = "₹${String.format(indianLocale, "%.2f", categoryItem.totalAmount)}",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 18.sp,
+                            color = categoryColor
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // Transaction list in category
+                if (transactions.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "No transactions found in this category",
+                            fontSize = 13.sp,
+                            color = MaterialTheme.colorScheme.outline
+                        )
+                    }
+                } else {
+                    LazyColumn(
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        items(transactions, key = { it.transaction.id }) { item ->
+                            TransactionItemCard(
+                                item = item,
+                                onClick = { onTransactionClick(item) }
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun SupportHelpDialog(
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    val supportEmail = "ashwinsaji2588@gmail.com"
+
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = RoundedCornerShape(24.dp),
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 6.dp,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(22.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.Info,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Help & Support",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 18.sp
+                        )
+                    }
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.Default.Close, contentDescription = "Close")
+                    }
+                }
+
+                LazyColumn(
+                    modifier = Modifier.height(340.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    item {
+                        Text(
+                            text = "About SpendSync",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Text(
+                            text = "SpendSync automatically reads transaction SMS from your bank to track debit, spend, and split reimbursements completely on-device.",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    item {
+                        Text(
+                            text = "Background SMS Permissions Troubleshooting",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Text(
+                            text = "On devices with aggressive battery optimization (Xiaomi/MIUI, Samsung, OnePlus, Oppo, Vivo):\n" +
+                                    "1. Go to Settings > Apps > SpendSync.\n" +
+                                    "2. Enable 'Autostart' or 'Background Activity'.\n" +
+                                    "3. Set Battery Saver to 'No Restrictions'.\n" +
+                                    "4. Ensure SMS permissions are set to 'Always Allow'.",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    item {
+                        Text(
+                            text = "Split & Reimbursement Tracker",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Text(
+                            text = "Enable the 'UPI Split Listener' in the sidebar to auto-intercept split requests from Google Pay and PhonePe, or split manual cash expenses with friends.",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    item {
+                        Text(
+                            text = "Developer & Support Contact",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Text(
+                            text = "For queries, bug reports, or feature requests, contact:\n$supportEmail",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                Button(
+                    onClick = {
+                        val emailIntent = Intent(Intent.ACTION_SENDTO).apply {
+                            data = Uri.parse("mailto:$supportEmail")
+                            putExtra(Intent.EXTRA_SUBJECT, "SpendSync Support & Feedback")
+                        }
+                        runCatching { context.startActivity(emailIntent) }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text("Email Support ($supportEmail)", fontSize = 13.sp)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun TransactionItemCard(
+    item: TransactionWithDetails,
+    onClick: () -> Unit
+) {
+    val transaction = item.transaction
+    val categoryName = item.category?.name ?: "General"
+    val accountName = item.account?.name ?: "Account"
+
+    val indianLocale = remember { Locale.Builder().setLanguage("en").setRegion("IN").build() }
+    val formattedDate = remember(transaction.timestamp) {
+        val sdf = SimpleDateFormat("dd MMM, hh:mm a", Locale.getDefault())
+        sdf.format(Date(transaction.timestamp))
+    }
+
+    val (amountColor, amountPrefix) = when (transaction.transactionType) {
+        TransactionType.EXPENSE -> Color(0xFFE53935) to "- "
+        TransactionType.INCOME -> Color(0xFF43A047) to "+ "
+        TransactionType.TRANSFER -> Color(0xFF757575) to "⇄ "
+    }
+
+    val categoryIcon = getCategoryIcon(categoryName)
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() },
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.weight(1f)
+            ) {
+                // Category Icon Bubble
+                Box(
+                    modifier = Modifier
+                        .size(42.dp)
+                        .clip(CircleShape)
+                        .background(amountColor.copy(alpha = 0.15f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = categoryIcon,
+                        contentDescription = categoryName,
+                        tint = amountColor,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.width(12.dp))
+
+                Column {
+                    Text(
+                        text = transaction.merchantName,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 14.sp,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = "$categoryName • $accountName",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    if (transaction.isSplit && transaction.reimbursementAmount > 0) {
+                        Text(
+                            text = "Split: ${transaction.peerName ?: "Friend"} owes ₹${String.format(indianLocale, "%.0f", transaction.reimbursementAmount)}",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = formattedDate,
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.outline
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.width(8.dp))
+
+            Column(horizontalAlignment = Alignment.End) {
+                Text(
+                    text = "$amountPrefix₹${String.format(indianLocale, "%.2f", transaction.amount)}",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 15.sp,
+                    color = amountColor
+                )
+                if (transaction.isSplit && transaction.reimbursementAmount > 0) {
+                    val net = (transaction.amount - transaction.reimbursementAmount).coerceAtLeast(0.0)
+                    Text(
+                        text = "Net: ₹${String.format(indianLocale, "%.2f", net)}",
+                        fontSize = 10.sp,
+                        color = MaterialTheme.colorScheme.outline
+                    )
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun EditTransactionCategoryDialog(
+    transactionDetails: TransactionWithDetails,
+    categories: List<Category>,
+    onDismiss: () -> Unit,
+    onSave: (newCategoryId: Long, saveRule: Boolean, keyword: String) -> Unit
+) {
+    var selectedCatId by remember { mutableStateOf(transactionDetails.transaction.categoryId) }
+    var saveRuleCheckbox by remember { mutableStateOf(true) }
+    var keywordText by remember { mutableStateOf(transactionDetails.transaction.merchantName) }
+    var dropdownExpanded by remember { mutableStateOf(false) }
+
+    val currentCategory = categories.find { it.id == selectedCatId } ?: categories.firstOrNull()
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Edit Category", fontWeight = FontWeight.Bold) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    text = "Transaction: ${transactionDetails.transaction.merchantName}",
+                    fontSize = 13.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                ExposedDropdownMenuBox(
+                    expanded = dropdownExpanded,
+                    onExpandedChange = { dropdownExpanded = !dropdownExpanded }
+                ) {
+                    OutlinedTextField(
+                        value = currentCategory?.name ?: "Select Category",
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("Category") },
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = dropdownExpanded) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+
+                    ExposedDropdownMenu(
+                        expanded = dropdownExpanded,
+                        onDismissRequest = { dropdownExpanded = false }
+                    ) {
+                        categories.forEach { category ->
+                            DropdownMenuItem(
+                                text = { Text(category.name) },
+                                onClick = {
+                                    selectedCatId = category.id
+                                    dropdownExpanded = false
+                                }
+                            )
+                        }
+                    }
+                }
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(top = 4.dp)
+                ) {
+                    Checkbox(
+                        checked = saveRuleCheckbox,
+                        onCheckedChange = { saveRuleCheckbox = it }
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "Auto-learn: Always categorize matching transactions as '${currentCategory?.name}'",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+
+                if (saveRuleCheckbox) {
+                    OutlinedTextField(
+                        value = keywordText,
+                        onValueChange = { keywordText = it },
+                        label = { Text("Merchant Keyword Rule") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(10.dp)
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    onSave(selectedCatId, saveRuleCheckbox, keywordText)
+                }
+            ) {
+                Text("Save")
+            }
+        },
+        dismissButton = {
+            OutlinedButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
+}
+
+@Composable
+fun PendingSettlementsDialog(
+    settlements: List<TransactionWithDetails>,
+    onDismiss: () -> Unit,
+    onMarkSettled: (Long) -> Unit
+) {
+    val indianLocale = remember { Locale.Builder().setLanguage("en").setRegion("IN").build() }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = RoundedCornerShape(20.dp),
+            color = MaterialTheme.colorScheme.surface,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(20.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Pending Settlements",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 18.sp
+                    )
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.Default.Close, contentDescription = "Close")
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                if (settlements.isEmpty()) {
+                    Text(
+                        text = "No pending settlements. All splits are settled!",
+                        fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.outline
+                    )
+                } else {
+                    LazyColumn(
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.height(300.dp)
+                    ) {
+                        items(settlements) { item ->
+                            val t = item.transaction
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(12.dp),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                                )
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(12.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = t.peerName ?: "Friend",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 14.sp
+                                        )
+                                        Text(
+                                            text = "For: ${t.merchantName}",
+                                            fontSize = 12.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        Text(
+                                            text = "Owes: ₹${String.format(indianLocale, "%.2f", t.reimbursementAmount)}",
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                    }
+                                    Button(
+                                        onClick = { onMarkSettled(t.id) },
+                                        shape = RoundedCornerShape(8.dp)
+                                    ) {
+                                        Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("Settled", fontSize = 11.sp)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun CategoryRulesDialog(
+    rules: List<CategoryRule>,
+    categories: List<Category>,
+    onDismiss: () -> Unit,
+    onDeleteRule: (CategoryRule) -> Unit,
+    onAddRule: (String, Long) -> Unit
+) {
+    var newKeyword by remember { mutableStateOf("") }
+    val selectedCatId by remember { mutableStateOf(categories.firstOrNull()?.id ?: 1L) }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = RoundedCornerShape(20.dp),
+            color = MaterialTheme.colorScheme.surface,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Auto-Categorize Rules", fontWeight = FontWeight.Bold, fontSize = 17.sp)
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.Default.Close, contentDescription = "Close")
+                    }
+                }
+
+                // Add new rule inputs
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    OutlinedTextField(
+                        value = newKeyword,
+                        onValueChange = { newKeyword = it },
+                        placeholder = { Text("Keyword (e.g. uber)") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(10.dp)
+                    )
+                    Button(
+                        onClick = {
+                            if (newKeyword.isNotBlank()) {
+                                onAddRule(newKeyword.trim(), selectedCatId)
+                                newKeyword = ""
+                            }
+                        },
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Text("Add", fontSize = 12.sp)
+                    }
+                }
+
+                if (rules.isEmpty()) {
+                    Text(
+                        text = "No custom rules yet. When you change a transaction's category, it will auto-learn rules.",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.outline
+                    )
+                } else {
+                    LazyColumn(
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.height(240.dp)
+                    ) {
+                        items(rules) { rule ->
+                            val catName = categories.find { it.id == rule.targetCategoryId }?.name ?: "Category #${rule.targetCategoryId}"
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(10.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column {
+                                        Text(text = "\"${rule.merchantKeyword}\"", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                                        Text(text = "Maps to: $catName", fontSize = 11.sp, color = MaterialTheme.colorScheme.primary)
+                                    }
+                                    IconButton(onClick = { onDeleteRule(rule) }) {
+                                        Icon(Icons.Default.Delete, contentDescription = "Delete Rule", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(18.dp))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ManualEntryDialog(
+    accounts: List<Account>,
+    categories: List<Category>,
+    onDismiss: () -> Unit,
+    onSave: (amount: Double, merchant: String, type: TransactionType, categoryId: Long, accountId: Long, isSplit: Boolean, reimbursementAmount: Double, peerName: String?) -> Unit
+) {
+    var amountText by remember { mutableStateOf("") }
+    var merchantText by remember { mutableStateOf("") }
+    var selectedType by remember { mutableStateOf(TransactionType.EXPENSE) }
+    var selectedCatId by remember { mutableStateOf(categories.firstOrNull()?.id ?: 1L) }
+    var selectedAccId by remember { mutableStateOf(accounts.firstOrNull()?.id ?: 1L) }
+    var isSplitEnabled by remember { mutableStateOf(false) }
+    var reimbursementText by remember { mutableStateOf("") }
+    var peerNameText by remember { mutableStateOf("") }
+    var categoryDropdownExpanded by remember { mutableStateOf(false) }
+    var accountDropdownExpanded by remember { mutableStateOf(false) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+
+    val currentCat = categories.find { it.id == selectedCatId } ?: categories.firstOrNull()
+    val currentAcc = accounts.find { it.id == selectedAccId } ?: accounts.firstOrNull()
+
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = RoundedCornerShape(24.dp),
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 6.dp,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text(
+                    text = "Add Transaction",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+
+                // Type Toggle
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    FilterChip(
+                        selected = selectedType == TransactionType.EXPENSE,
+                        onClick = { selectedType = TransactionType.EXPENSE },
+                        label = { Text("Expense") },
+                        modifier = Modifier.weight(1f)
+                    )
+                    FilterChip(
+                        selected = selectedType == TransactionType.INCOME,
+                        onClick = { selectedType = TransactionType.INCOME },
+                        label = { Text("Income") },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+
+                // Amount
+                OutlinedTextField(
+                    value = amountText,
+                    onValueChange = {
+                        amountText = it
+                        errorMessage = null
+                    },
+                    label = { Text("Amount (₹)") },
+                    placeholder = { Text("0.00") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp)
+                )
+
+                // Merchant
+                OutlinedTextField(
+                    value = merchantText,
+                    onValueChange = {
+                        merchantText = it
+                        errorMessage = null
+                    },
+                    label = { Text(if (selectedType == TransactionType.EXPENSE) "Merchant / Spent on" else "Source / Income from") },
+                    placeholder = { Text("e.g. Starbucks, Grocery, Freelance") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp)
+                )
+
+                // Category Selector
+                ExposedDropdownMenuBox(
+                    expanded = categoryDropdownExpanded,
+                    onExpandedChange = { categoryDropdownExpanded = !categoryDropdownExpanded }
+                ) {
+                    OutlinedTextField(
+                        value = currentCat?.name ?: "Category",
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("Category") },
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = categoryDropdownExpanded) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+
+                    ExposedDropdownMenu(
+                        expanded = categoryDropdownExpanded,
+                        onDismissRequest = { categoryDropdownExpanded = false }
+                    ) {
+                        categories.forEach { category ->
+                            DropdownMenuItem(
+                                text = { Text(category.name) },
+                                onClick = {
+                                    selectedCatId = category.id
+                                    categoryDropdownExpanded = false
+                                }
+                            )
+                        }
+                    }
+                }
+
+                // Account Selector
+                ExposedDropdownMenuBox(
+                    expanded = accountDropdownExpanded,
+                    onExpandedChange = { accountDropdownExpanded = !accountDropdownExpanded }
+                ) {
+                    OutlinedTextField(
+                        value = currentAcc?.name ?: "Account",
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("Account") },
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = accountDropdownExpanded) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+
+                    ExposedDropdownMenu(
+                        expanded = accountDropdownExpanded,
+                        onDismissRequest = { accountDropdownExpanded = false }
+                    ) {
+                        accounts.forEach { account ->
+                            DropdownMenuItem(
+                                text = { Text(account.name) },
+                                onClick = {
+                                    selectedAccId = account.id
+                                    accountDropdownExpanded = false
+                                }
+                            )
+                        }
+                    }
+                }
+
+                // Split Expense / Reimbursement Toggle (Only for expenses)
+                if (selectedType == TransactionType.EXPENSE) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Split expense (Reimbursement)", fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                        Switch(
+                            checked = isSplitEnabled,
+                            onCheckedChange = { isSplitEnabled = it }
+                        )
+                    }
+
+                    if (isSplitEnabled) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedTextField(
+                                value = peerNameText,
+                                onValueChange = { peerNameText = it },
+                                label = { Text("Friend Name") },
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(10.dp)
+                            )
+                            OutlinedTextField(
+                                value = reimbursementText,
+                                onValueChange = { reimbursementText = it },
+                                label = { Text("Owed (₹)") },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(10.dp)
+                            )
+                        }
+                    }
+                }
+
+                if (errorMessage != null) {
+                    Text(
+                        text = errorMessage ?: "",
+                        color = MaterialTheme.colorScheme.error,
+                        fontSize = 12.sp
+                    )
+                }
+
+                // Action Buttons
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    OutlinedButton(onClick = onDismiss, shape = RoundedCornerShape(10.dp)) {
+                        Text("Cancel")
+                    }
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Button(
+                        onClick = {
+                            val amountVal = amountText.toDoubleOrNull()
+                            if (amountVal == null || amountVal <= 0.0) {
+                                errorMessage = "Please enter a valid amount greater than 0"
+                                return@Button
+                            }
+                            val merchantVal = merchantText.trim().ifEmpty {
+                                if (selectedType == TransactionType.EXPENSE) "Manual Expense" else "Manual Income"
+                            }
+                            val reimbursementVal = if (isSplitEnabled) reimbursementText.toDoubleOrNull() ?: 0.0 else 0.0
+                            val peerVal = if (isSplitEnabled) peerNameText.trim().ifEmpty { "Friend" } else null
+
+                            onSave(
+                                amountVal,
+                                merchantVal,
+                                selectedType,
+                                selectedCatId,
+                                selectedAccId,
+                                isSplitEnabled,
+                                reimbursementVal,
+                                peerVal
+                            )
+                        },
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Text("Save")
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun MonthSelectorRow(
+    months: List<MonthOption>,
+    selectedMonth: MonthOption,
+    onMonthSelected: (MonthOption) -> Unit
+) {
+    val scrollState = rememberScrollState()
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(scrollState),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        months.forEach { month ->
+            val isSelected = month.startTimestamp == selectedMonth.startTimestamp
+            FilterChip(
+                selected = isSelected,
+                onClick = { onMonthSelected(month) },
+                label = {
+                    Text(
+                        text = month.label,
+                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                        fontSize = 12.sp
+                    )
+                },
+                colors = FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                    selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
+                ),
+                shape = RoundedCornerShape(20.dp)
+            )
+        }
+    }
+}
+
+private fun getCategoryIcon(category: String): ImageVector {
+    return when (category.lowercase(Locale.ROOT)) {
+        "food" -> Icons.Default.ShoppingCart
+        "entertainment" -> Icons.Default.DateRange
+        "shopping" -> Icons.Default.ShoppingCart
+        "grocery" -> Icons.Default.ShoppingCart
+        "travel" -> Icons.Default.Call
+        "bills & utilities" -> Icons.Default.AccountBox
+        "health" -> Icons.Default.Info
+        "investment" -> Icons.Default.Share
+        else -> Icons.Default.Info
+    }
+}
+
+private fun getCategoryColor(category: String): Color {
+    return when (category.lowercase(Locale.ROOT)) {
+        "food" -> Color(0xFFFF7043)
+        "entertainment" -> Color(0xFFAB47BC)
+        "shopping" -> Color(0xFF29B6F6)
+        "grocery" -> Color(0xFF66BB6A)
+        "travel" -> Color(0xFFFFA726)
+        "bills & utilities" -> Color(0xFFEF5350)
+        "health" -> Color(0xFFE91E63)
+        "investment" -> Color(0xFF009688)
+        "salary" -> Color(0xFF26A69A)
+        "freelance" -> Color(0xFF42A5F5)
+        else -> Color(0xFF7E57C2)
+    }
+}
