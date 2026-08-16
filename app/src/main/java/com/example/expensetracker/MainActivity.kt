@@ -17,6 +17,7 @@ import com.example.expensetracker.ui.AuthScreen
 import com.example.expensetracker.ui.DashboardScreen
 import com.example.expensetracker.ui.MainViewModel
 import com.example.expensetracker.ui.theme.ExpenseTrackerTheme
+import com.google.firebase.FirebaseApp
 import com.google.firebase.auth.FirebaseAuth
 
 class MainActivity : ComponentActivity() {
@@ -26,6 +27,23 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+
+        // Safely initialize Firebase without crashing if google-services.json is missing
+        val isFirebaseReady = try {
+            if (FirebaseApp.getApps(this).isEmpty()) {
+                FirebaseApp.initializeApp(this)
+            }
+            true
+        } catch (e: Exception) {
+            false
+        }
+
+        val currentUser = try {
+            if (isFirebaseReady) FirebaseAuth.getInstance().currentUser else null
+        } catch (e: Exception) {
+            null
+        }
+
         setContent {
             ExpenseTrackerTheme {
                 Surface(
@@ -33,14 +51,18 @@ class MainActivity : ComponentActivity() {
                     color = MaterialTheme.colorScheme.background
                 ) {
                     var isAuthenticated by remember {
-                        mutableStateOf(FirebaseAuth.getInstance().currentUser != null)
+                        mutableStateOf(currentUser != null || !isFirebaseReady)
                     }
 
                     if (isAuthenticated) {
                         DashboardScreen(
                             viewModel = viewModel,
                             onSignOut = {
-                                FirebaseAuth.getInstance().signOut()
+                                try {
+                                    FirebaseAuth.getInstance().signOut()
+                                } catch (e: Exception) {
+                                    // Ignore sign-out errors when running in offline mode
+                                }
                                 isAuthenticated = false
                             }
                         )

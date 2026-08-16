@@ -7,9 +7,6 @@ import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 
 @Database(
     entities = [
@@ -75,19 +72,10 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL("CREATE INDEX IF NOT EXISTS `index_category_rules_targetCategoryId` ON `category_rules` (`targetCategoryId`)")
 
                 // Seed default categories
-                val defaultCategories = listOf(
-                    "Food", "Grocery", "Shopping", "Entertainment",
-                    "Travel", "Bills & Utilities", "General",
-                    "Salary", "Freelance", "Investment"
-                )
-                for (cat in defaultCategories) {
-                    db.execSQL("INSERT OR IGNORE INTO `categories` (`name`) VALUES ('$cat')")
-                }
+                seedCategoriesSql(db)
 
                 // Seed default accounts
-                db.execSQL("INSERT OR IGNORE INTO `accounts` (`id`, `name`, `type`) VALUES (1, 'Primary Bank Account', 'BANK_ACCOUNT')")
-                db.execSQL("INSERT OR IGNORE INTO `accounts` (`id`, `name`, `type`) VALUES (2, 'Cash', 'CASH')")
-                db.execSQL("INSERT OR IGNORE INTO `accounts` (`id`, `name`, `type`) VALUES (3, 'Credit Card', 'CREDIT_CARD')")
+                seedAccountsSql(db)
 
                 // 4. Create new transactions table with foreign keys & split columns
                 db.execSQL(
@@ -133,7 +121,7 @@ abstract class AppDatabase : RoomDatabase() {
                 )
 
                 // Drop old table and rename new table
-                db.execSQL("DROP TABLE `transactions`")
+                db.execSQL("DROP TABLE IF EXISTS `transactions`")
                 db.execSQL("ALTER TABLE `transactions_new` RENAME TO `transactions`")
 
                 // Recreate indices on transactions table
@@ -141,6 +129,31 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL("CREATE INDEX IF NOT EXISTS `index_transactions_accountId` ON `transactions` (`accountId`)")
                 db.execSQL("CREATE INDEX IF NOT EXISTS `index_transactions_categoryId` ON `transactions` (`categoryId`)")
             }
+        }
+
+        private fun seedCategoriesSql(db: SupportSQLiteDatabase) {
+            val defaultCategories = listOf(
+                Pair("Food", "#FF7043"),
+                Pair("Grocery", "#66BB6A"),
+                Pair("Shopping", "#29B6F6"),
+                Pair("Entertainment", "#AB47BC"),
+                Pair("Travel", "#FFA726"),
+                Pair("Bills & Utilities", "#EF5350"),
+                Pair("General", "#7E57C2"),
+                Pair("Salary", "#26A69A"),
+                Pair("Freelance", "#42A5F5"),
+                Pair("Investment", "#8D6E63"),
+                Pair("Health", "#E91E63")
+            )
+            for ((name, color) in defaultCategories) {
+                db.execSQL("INSERT OR IGNORE INTO `categories` (`name`, `colorHex`) VALUES ('$name', '$color')")
+            }
+        }
+
+        private fun seedAccountsSql(db: SupportSQLiteDatabase) {
+            db.execSQL("INSERT OR IGNORE INTO `accounts` (`id`, `name`, `type`) VALUES (1, 'Primary Bank Account', 'BANK_ACCOUNT')")
+            db.execSQL("INSERT OR IGNORE INTO `accounts` (`id`, `name`, `type`) VALUES (2, 'Cash', 'CASH')")
+            db.execSQL("INSERT OR IGNORE INTO `accounts` (`id`, `name`, `type`) VALUES (3, 'Credit Card', 'CREDIT_CARD')")
         }
 
         fun getDatabase(context: Context): AppDatabase {
@@ -151,15 +164,18 @@ abstract class AppDatabase : RoomDatabase() {
                     "expense_tracker_database"
                 )
                     .addMigrations(MIGRATION_1_2)
+                    .fallbackToDestructiveMigration(true)
                     .addCallback(object : Callback() {
                         override fun onCreate(db: SupportSQLiteDatabase) {
                             super.onCreate(db)
-                            // Populate default seed data on fresh creation
-                            CoroutineScope(Dispatchers.IO).launch {
-                                INSTANCE?.let { database ->
-                                    seedInitialData(database)
-                                }
-                            }
+                            seedCategoriesSql(db)
+                            seedAccountsSql(db)
+                        }
+
+                        override fun onOpen(db: SupportSQLiteDatabase) {
+                            super.onOpen(db)
+                            seedCategoriesSql(db)
+                            seedAccountsSql(db)
                         }
                     })
                     .build()
@@ -169,32 +185,36 @@ abstract class AppDatabase : RoomDatabase() {
         }
 
         suspend fun seedInitialData(db: AppDatabase) {
-            val accountDao = db.accountDao()
-            val categoryDao = db.categoryDao()
+            // Safe helper for in-memory / DAO seeding if needed
+            runCatching {
+                val categoryDao = db.categoryDao()
+                val accountDao = db.accountDao()
 
-            if (categoryDao.getCount() == 0) {
-                val categories = listOf(
-                    Category(name = "Food", iconName = "food", colorHex = "#FF7043"),
-                    Category(name = "Grocery", iconName = "grocery", colorHex = "#66BB6A"),
-                    Category(name = "Shopping", iconName = "shopping", colorHex = "#29B6F6"),
-                    Category(name = "Entertainment", iconName = "entertainment", colorHex = "#AB47BC"),
-                    Category(name = "Travel", iconName = "travel", colorHex = "#FFA726"),
-                    Category(name = "Bills & Utilities", iconName = "bills", colorHex = "#EF5350"),
-                    Category(name = "General", iconName = "general", colorHex = "#7E57C2"),
-                    Category(name = "Salary", iconName = "salary", colorHex = "#26A69A"),
-                    Category(name = "Freelance", iconName = "freelance", colorHex = "#42A5F5"),
-                    Category(name = "Investment", iconName = "investment", colorHex = "#8D6E63")
-                )
-                categoryDao.insertCategories(categories)
-            }
+                if (categoryDao.getCount() == 0) {
+                    val categories = listOf(
+                        Category(name = "Food", iconName = "food", colorHex = "#FF7043"),
+                        Category(name = "Grocery", iconName = "grocery", colorHex = "#66BB6A"),
+                        Category(name = "Shopping", iconName = "shopping", colorHex = "#29B6F6"),
+                        Category(name = "Entertainment", iconName = "entertainment", colorHex = "#AB47BC"),
+                        Category(name = "Travel", iconName = "travel", colorHex = "#FFA726"),
+                        Category(name = "Bills & Utilities", iconName = "bills", colorHex = "#EF5350"),
+                        Category(name = "General", iconName = "general", colorHex = "#7E57C2"),
+                        Category(name = "Salary", iconName = "salary", colorHex = "#26A69A"),
+                        Category(name = "Freelance", iconName = "freelance", colorHex = "#42A5F5"),
+                        Category(name = "Investment", iconName = "investment", colorHex = "#8D6E63"),
+                        Category(name = "Health", iconName = "health", colorHex = "#E91E63")
+                    )
+                    categoryDao.insertCategories(categories)
+                }
 
-            if (accountDao.getCount() == 0) {
-                val accounts = listOf(
-                    Account(name = "Primary Bank Account", type = AccountType.BANK_ACCOUNT),
-                    Account(name = "Cash", type = AccountType.CASH),
-                    Account(name = "Credit Card", type = AccountType.CREDIT_CARD)
-                )
-                accountDao.insertAccounts(accounts)
+                if (accountDao.getCount() == 0) {
+                    val accounts = listOf(
+                        Account(id = 1, name = "Primary Bank Account", type = AccountType.BANK_ACCOUNT),
+                        Account(id = 2, name = "Cash", type = AccountType.CASH),
+                        Account(id = 3, name = "Credit Card", type = AccountType.CREDIT_CARD)
+                    )
+                    accountDao.insertAccounts(accounts)
+                }
             }
         }
     }
