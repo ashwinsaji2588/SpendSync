@@ -454,6 +454,66 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun updateAccountDetails(
+        accountId: Long,
+        name: String,
+        type: AccountType,
+        nickname: String?,
+        last4: String?
+    ) {
+        viewModelScope.launch {
+            val trimmedName = name.trim().ifEmpty { "Account" }
+            val trimmedNickname = nickname?.trim()?.ifEmpty { null }
+            val trimmedLast4 = last4?.trim()?.ifEmpty { null }
+            accountDao.updateAccountDetails(accountId, trimmedName, type, trimmedNickname, trimmedLast4)
+        }
+    }
+
+    fun createAccount(
+        name: String,
+        type: AccountType,
+        nickname: String?,
+        last4: String?
+    ) {
+        viewModelScope.launch {
+            val trimmedName = name.trim().ifEmpty { "New Account" }
+            val trimmedNickname = nickname?.trim()?.ifEmpty { null }
+            val trimmedLast4 = last4?.trim()?.ifEmpty { null }
+            accountDao.insertAccount(
+                Account(
+                    name = trimmedName,
+                    type = type,
+                    nickname = trimmedNickname,
+                    accountNumberLast4 = trimmedLast4
+                )
+            )
+        }
+    }
+
+    suspend fun getTransactionCountForAccount(accountId: Long): Int {
+        return accountDao.getTransactionCountForAccount(accountId)
+    }
+
+    fun deleteAccount(
+        accountId: Long,
+        reassignToAccountId: Long? = null,
+        cascadeDeleteTransactions: Boolean = false
+    ) {
+        viewModelScope.launch {
+            if (reassignToAccountId != null) {
+                accountDao.reassignTransactions(accountId, reassignToAccountId)
+            } else if (cascadeDeleteTransactions) {
+                accountDao.deleteTransactionsByAccount(accountId)
+            }
+
+            accountDao.deleteAccountById(accountId)
+
+            if (_selectedAccount.value?.id == accountId) {
+                _selectedAccount.value = null
+            }
+        }
+    }
+
     /**
      * Updates all fields of a transaction with live recalculation and optional auto-learning rule.
      */

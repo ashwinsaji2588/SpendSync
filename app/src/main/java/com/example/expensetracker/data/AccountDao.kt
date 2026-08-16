@@ -37,4 +37,29 @@ interface AccountDao {
 
     @Query("UPDATE accounts SET nickname = :nickname WHERE id = :accountId")
     suspend fun updateAccountNickname(accountId: Long, nickname: String?)
+
+    @Query("""
+        UPDATE accounts 
+        SET name = :name, type = :type, nickname = :nickname, accountNumberLast4 = :last4 
+        WHERE id = :accountId
+    """)
+    suspend fun updateAccountDetails(
+        accountId: Long,
+        name: String,
+        type: AccountType,
+        nickname: String?,
+        last4: String?
+    )
+
+    @Query("DELETE FROM accounts WHERE id = :accountId")
+    suspend fun deleteAccountById(accountId: Long)
+
+    @Query("SELECT COUNT(*) FROM transactions WHERE accountId = :accountId")
+    suspend fun getTransactionCountForAccount(accountId: Long): Int
+
+    @Query("UPDATE transactions SET accountId = :targetAccountId WHERE accountId = :fromAccountId")
+    suspend fun reassignTransactions(fromAccountId: Long, targetAccountId: Long)
+
+    @Query("DELETE FROM transactions WHERE accountId = :accountId")
+    suspend fun deleteTransactionsByAccount(accountId: Long)
 }

@@ -117,6 +117,9 @@ import com.example.expensetracker.data.TransactionType
 import com.example.expensetracker.data.TransactionWithDetails
 import com.example.expensetracker.ui.components.AdvancedAnalyticsSection
 import com.example.expensetracker.ui.components.BudgetsDialog
+import com.example.expensetracker.ui.components.CreateAccountDialog
+import com.example.expensetracker.ui.components.DeleteAccountConfirmationDialog
+import com.example.expensetracker.ui.components.EditAccountDialog
 import com.example.expensetracker.ui.components.FullEditTransactionDialog
 import com.example.expensetracker.ui.components.SpendSyncLogo
 import com.example.expensetracker.ui.components.SubscriptionsDialog
@@ -165,7 +168,9 @@ fun DashboardScreen(
     var selectedTransactionForEdit by remember { mutableStateOf<TransactionWithDetails?>(null) }
     var transactionToDelete by remember { mutableStateOf<TransactionWithDetails?>(null) }
     var selectedCategoryForDrillDown by remember { mutableStateOf<CategoryBreakdownItem?>(null) }
-    var accountToEditNickname by remember { mutableStateOf<Account?>(null) }
+    var accountToEdit by remember { mutableStateOf<Account?>(null) }
+    var showCreateAccountDialog by remember { mutableStateOf(false) }
+    var accountToDeleteWithCount by remember { mutableStateOf<Pair<Account, Int>?>(null) }
 
     // File Import Launcher
     val csvImportLauncher = rememberLauncherForActivityResult(
@@ -239,8 +244,12 @@ fun DashboardScreen(
                         viewModel.selectAccount(account)
                         coroutineScope.launch { drawerState.close() }
                     },
-                    onEditAccountNickname = { account ->
-                        accountToEditNickname = account
+                    onEditAccount = { account ->
+                        accountToEdit = account
+                        coroutineScope.launch { drawerState.close() }
+                    },
+                    onAddNewAccount = {
+                        showCreateAccountDialog = true
                         coroutineScope.launch { drawerState.close() }
                     },
                     onOpenBudgets = {
@@ -747,14 +756,49 @@ fun DashboardScreen(
         )
     }
 
-    // Edit Account Nickname Dialog
-    accountToEditNickname?.let { account ->
-        EditAccountNicknameDialog(
+    // Full Edit Account Dialog
+    accountToEdit?.let { account ->
+        EditAccountDialog(
             account = account,
-            onDismiss = { accountToEditNickname = null },
-            onSave = { newNickname ->
-                viewModel.updateAccountNickname(account.id, newNickname)
-                accountToEditNickname = null
+            allAccounts = allAccounts,
+            onDismiss = { accountToEdit = null },
+            onSave = { name, type, nickname, last4 ->
+                viewModel.updateAccountDetails(account.id, name, type, nickname, last4)
+                accountToEdit = null
+            },
+            onDeleteRequest = {
+                val currentAccount = account
+                accountToEdit = null
+                coroutineScope.launch {
+                    val count = viewModel.getTransactionCountForAccount(currentAccount.id)
+                    accountToDeleteWithCount = currentAccount to count
+                }
+            }
+        )
+    }
+
+    // Create Account Dialog
+    if (showCreateAccountDialog) {
+        CreateAccountDialog(
+            onDismiss = { showCreateAccountDialog = false },
+            onSave = { name, type, nickname, last4 ->
+                viewModel.createAccount(name, type, nickname, last4)
+                showCreateAccountDialog = false
+            }
+        )
+    }
+
+    // Delete Account Confirmation Dialog
+    accountToDeleteWithCount?.let { (account, txnCount) ->
+        val otherAccounts = allAccounts.filter { it.id != account.id }
+        DeleteAccountConfirmationDialog(
+            account = account,
+            otherAccounts = otherAccounts,
+            transactionCount = txnCount,
+            onDismiss = { accountToDeleteWithCount = null },
+            onConfirmDelete = { reassignId, cascade ->
+                viewModel.deleteAccount(account.id, reassignId, cascade)
+                accountToDeleteWithCount = null
             }
         )
     }
@@ -835,7 +879,8 @@ fun SidebarContent(
     onToggleTheme: (Boolean?) -> Unit,
     onToggleBiometric: (Boolean) -> Unit,
     onAccountSelected: (Account?) -> Unit,
-    onEditAccountNickname: (Account) -> Unit,
+    onEditAccount: (Account) -> Unit,
+    onAddNewAccount: () -> Unit,
     onOpenBudgets: () -> Unit,
     onOpenSubscriptions: () -> Unit,
     onImportCsv: () -> Unit,
@@ -877,14 +922,32 @@ fun SidebarContent(
 
         Spacer(modifier = Modifier.height(18.dp))
 
-        // Accounts section title
-        Text(
-            text = "ACCOUNTS & CARDS",
-            fontSize = 11.sp,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.outline,
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
-        )
+        // Accounts section title with Add Button
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "ACCOUNTS & CARDS",
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.outline
+            )
+            IconButton(
+                onClick = onAddNewAccount,
+                modifier = Modifier.size(24.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Add,
+                    contentDescription = "Add Account",
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+        }
 
         // All Accounts item
         NavigationDrawerItem(
@@ -899,7 +962,9 @@ fun SidebarContent(
             val isSelected = selectedAccount?.id == account.id
             val icon = when (account.type) {
                 AccountType.CREDIT_CARD -> Icons.Default.ShoppingCart
+                AccountType.DEBIT_CARD -> Icons.Default.AccountBox
                 AccountType.CASH -> Icons.Default.Person
+                AccountType.WALLET -> Icons.Default.Share
                 else -> Icons.Default.AccountBox
             }
             val displayName = account.nickname ?: account.name
@@ -919,12 +984,12 @@ fun SidebarContent(
                             }
                         }
                         IconButton(
-                            onClick = { onEditAccountNickname(account) },
+                            onClick = { onEditAccount(account) },
                             modifier = Modifier.size(24.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Edit,
-                                contentDescription = "Edit Nickname",
+                                contentDescription = "Edit Account",
                                 tint = MaterialTheme.colorScheme.outline,
                                 modifier = Modifier.size(14.dp)
                             )
