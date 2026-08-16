@@ -15,6 +15,7 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -630,11 +631,13 @@ fun SidebarContent(
     onOpenNotificationSettings: () -> Unit,
     onSignOut: () -> Unit
 ) {
+    val scrollState = rememberScrollState()
     val indianLocale = remember { Locale.Builder().setLanguage("en").setRegion("IN").build() }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .verticalScroll(scrollState)
             .padding(16.dp)
     ) {
         Row(
