@@ -37,6 +37,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 
@@ -70,6 +71,9 @@ dependencies {
 
     // Biometric Authentication
     implementation(libs.androidx.biometric)
+
+    // Google Gemini AI SDK
+    implementation(libs.google.generativeai)
 
     testImplementation(libs.junit)
     androidTestImplementation(platform(libs.androidx.compose.bom))

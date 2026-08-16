@@ -16,7 +16,8 @@ import kotlinx.coroutines.withContext
 class HistoricalSmsScanner(
     private val context: Context,
     private val db: AppDatabase = AppDatabase.getDatabase(context),
-    private val parserEngine: SmsParserEngine = SmsParserEngine()
+    private val parserEngine: SmsParserEngine = SmsParserEngine(),
+    private val geminiService: GeminiService = GeminiService(context)
 ) {
 
     /**
@@ -68,7 +69,7 @@ class HistoricalSmsScanner(
                     val date = if (dateIdx != -1) cursor.getLong(dateIdx) else System.currentTimeMillis()
 
                     if (parserEngine.isBankSender(address)) {
-                        val transaction = parserEngine.parseAndBuildTransaction(
+                        var transaction = parserEngine.parseAndBuildTransaction(
                             smsBody = body,
                             senderId = address,
                             timestamp = date,
@@ -76,6 +77,32 @@ class HistoricalSmsScanner(
                             categoryDao = categoryDao,
                             accountDao = accountDao
                         )
+
+                        // AI-Powered Fallback Parser for unclassified or obscure transactions
+                        if (transaction == null || transaction.merchantName.equals("Unknown Merchant", ignoreCase = true)) {
+                            val aiResult = geminiService.parseSmsWithAi(body)
+                            if (aiResult != null && aiResult.amount > 0) {
+                                val cat = categoryDao.getCategoryByName(aiResult.category)
+                                val catId = cat?.id ?: categoryDao.insertCategory(
+                                    com.example.expensetracker.data.Category(name = aiResult.category, colorHex = "#7E57C2")
+                                )
+                                val accId = accountDao.getAccountByName("Primary Bank Account")?.id
+                                    ?: (accountDao.getAllAccountsDirect().firstOrNull()?.id ?: 1L)
+
+                                transaction = TransactionEntity(
+                                    amount = aiResult.amount,
+                                    merchantName = aiResult.merchantName,
+                                    timestamp = date,
+                                    transactionType = aiResult.transactionType,
+                                    accountId = accId,
+                                    categoryId = if (catId > 0) catId else 7L,
+                                    isSplit = false,
+                                    reimbursementAmount = 0.0,
+                                    settled = false
+                                )
+                            }
+                        }
+
                         if (transaction != null) {
                             parsedTransactions.add(transaction)
                         }

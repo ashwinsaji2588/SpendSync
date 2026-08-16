@@ -52,6 +52,7 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.ShoppingCart
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -168,6 +169,7 @@ fun DashboardScreen(
     var selectedTransactionForEdit by remember { mutableStateOf<TransactionWithDetails?>(null) }
     var transactionToDelete by remember { mutableStateOf<TransactionWithDetails?>(null) }
     var selectedCategoryForDrillDown by remember { mutableStateOf<CategoryBreakdownItem?>(null) }
+    var showAiInsightsDialog by remember { mutableStateOf(false) }
     var accountToEdit by remember { mutableStateOf<Account?>(null) }
     var showCreateAccountDialog by remember { mutableStateOf(false) }
     var accountToDeleteWithCount by remember { mutableStateOf<Pair<Account, Int>?>(null) }
@@ -254,6 +256,10 @@ fun DashboardScreen(
                     },
                     onOpenBudgets = {
                         showBudgetsDialog = true
+                        coroutineScope.launch { drawerState.close() }
+                    },
+                    onOpenAiInsights = {
+                        showAiInsightsDialog = true
                         coroutineScope.launch { drawerState.close() }
                     },
                     onOpenSubscriptions = {
@@ -694,9 +700,9 @@ fun DashboardScreen(
             categories = allCategories,
             accounts = allAccounts,
             onDismiss = { selectedTransactionForEdit = null },
-            onSave = { id, merchant, amt, type, catId, accId, isSplit, reimb, peer, notes, saveRule, kw ->
+            onSave = { id, merchant, amt, type, catId, accId, isSplit, reimb, peer, notes, saveRule, kw, customCat ->
                 viewModel.updateTransactionFull(
-                    id, merchant, amt, type, catId, accId, isSplit, reimb, peer, notes, saveRule, kw
+                    id, merchant, amt, type, catId, accId, isSplit, reimb, peer, notes, saveRule, kw, customCat
                 )
                 selectedTransactionForEdit = null
             },
@@ -704,6 +710,18 @@ fun DashboardScreen(
                 viewModel.deleteTransaction(id)
                 selectedTransactionForEdit = null
             }
+        )
+    }
+
+    // AI Financial Insights Dialog
+    if (showAiInsightsDialog) {
+        val apiKey = viewModel.getGeminiApiKey()
+        AiInsightsDialog(
+            currentApiKey = apiKey,
+            financialContext = "",
+            onDismiss = { showAiInsightsDialog = false },
+            onSaveApiKey = { key -> viewModel.setGeminiApiKey(key) },
+            onSendQuery = { query -> viewModel.askGeminiFinancialAdvisor(query) }
         )
     }
 
@@ -831,7 +849,7 @@ fun DashboardScreen(
             accounts = allAccounts,
             categories = allCategories,
             onDismiss = { showManualAddDialog = false },
-            onSave = { amount, merchant, type, categoryId, accountId, isSplit, reimbursementAmount, peerName ->
+            onSave = { amount, merchant, type, categoryId, accountId, isSplit, reimbursementAmount, peerName, customCat ->
                 viewModel.addManualTransaction(
                     amount = amount,
                     merchantName = merchant,
@@ -840,7 +858,8 @@ fun DashboardScreen(
                     accountId = accountId,
                     isSplit = isSplit,
                     reimbursementAmount = reimbursementAmount,
-                    peerName = peerName
+                    peerName = peerName,
+                    customCategoryName = customCat
                 )
                 showManualAddDialog = false
             }
@@ -863,7 +882,7 @@ fun DashboardScreen(
             categories = allCategories,
             onDismiss = { showRulesManagerDialog = false },
             onDeleteRule = { rule -> viewModel.deleteCategoryRule(rule) },
-            onAddRule = { keyword, categoryId -> viewModel.saveCategoryRule(keyword, categoryId) }
+            onAddRule = { keyword, categoryId, customCat -> viewModel.saveCategoryRule(keyword, categoryId, customCat) }
         )
     }
 }
@@ -882,6 +901,7 @@ fun SidebarContent(
     onEditAccount: (Account) -> Unit,
     onAddNewAccount: () -> Unit,
     onOpenBudgets: () -> Unit,
+    onOpenAiInsights: () -> Unit,
     onOpenSubscriptions: () -> Unit,
     onImportCsv: () -> Unit,
     onExportCsv: () -> Unit,
@@ -1014,6 +1034,20 @@ fun SidebarContent(
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.outline,
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+        )
+
+        // AI Financial Insights
+        NavigationDrawerItem(
+            label = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("AI Financial Advisor")
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Gemini", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                }
+            },
+            selected = false,
+            onClick = onOpenAiInsights,
+            icon = { Icon(Icons.Default.Star, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }
         )
 
         // Budgets
@@ -1956,10 +1990,15 @@ fun CategoryRulesDialog(
     categories: List<Category>,
     onDismiss: () -> Unit,
     onDeleteRule: (CategoryRule) -> Unit,
-    onAddRule: (String, Long) -> Unit
+    onAddRule: (String, Long, String?) -> Unit
 ) {
     var newKeyword by remember { mutableStateOf("") }
-    val selectedCatId by remember { mutableStateOf(categories.firstOrNull()?.id ?: 1L) }
+    var selectedCatId by remember { mutableStateOf(categories.firstOrNull()?.id ?: 1L) }
+    var isCustomCat by remember { mutableStateOf(false) }
+    var customCatName by remember { mutableStateOf("") }
+    var categoryDropdownExpanded by remember { mutableStateOf(false) }
+
+    val currentCat = categories.find { it.id == selectedCatId } ?: categories.firstOrNull()
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(
@@ -1985,30 +2024,92 @@ fun CategoryRulesDialog(
                 }
 
                 // Add new rule inputs
-                Row(
+                OutlinedTextField(
+                    value = newKeyword,
+                    onValueChange = { newKeyword = it },
+                    label = { Text("Merchant Keyword (e.g. uber, groww)") },
+                    singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
+                    shape = RoundedCornerShape(10.dp)
+                )
+
+                if (!isCustomCat) {
+                    ExposedDropdownMenuBox(
+                        expanded = categoryDropdownExpanded,
+                        onExpandedChange = { categoryDropdownExpanded = !categoryDropdownExpanded }
+                    ) {
+                        OutlinedTextField(
+                            value = currentCat?.name ?: "Select Target Category",
+                            onValueChange = {},
+                            readOnly = true,
+                            label = { Text("Target Category") },
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = categoryDropdownExpanded) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable),
+                            shape = RoundedCornerShape(10.dp)
+                        )
+
+                        ExposedDropdownMenu(
+                            expanded = categoryDropdownExpanded,
+                            onDismissRequest = { categoryDropdownExpanded = false }
+                        ) {
+                            categories.forEach { category ->
+                                DropdownMenuItem(
+                                    text = { Text(category.name) },
+                                    onClick = {
+                                        selectedCatId = category.id
+                                        categoryDropdownExpanded = false
+                                    }
+                                )
+                            }
+                            HorizontalDivider()
+                            DropdownMenuItem(
+                                text = {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(Icons.Default.Add, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text("+ Add Custom Category...", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
+                                    }
+                                },
+                                onClick = {
+                                    isCustomCat = true
+                                    categoryDropdownExpanded = false
+                                }
+                            )
+                        }
+                    }
+                } else {
                     OutlinedTextField(
-                        value = newKeyword,
-                        onValueChange = { newKeyword = it },
-                        placeholder = { Text("Keyword (e.g. uber)") },
+                        value = customCatName,
+                        onValueChange = { customCatName = it },
+                        label = { Text("New Custom Category Name") },
+                        placeholder = { Text("e.g. Investment, KSFE") },
                         singleLine = true,
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(10.dp)
-                    )
-                    Button(
-                        onClick = {
-                            if (newKeyword.isNotBlank()) {
-                                onAddRule(newKeyword.trim(), selectedCatId)
-                                newKeyword = ""
+                        trailingIcon = {
+                            IconButton(onClick = { isCustomCat = false }) {
+                                Icon(Icons.Default.Close, contentDescription = "Cancel Custom")
                             }
                         },
+                        modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(10.dp)
-                    ) {
-                        Text("Add", fontSize = 12.sp)
-                    }
+                    )
+                }
+
+                Button(
+                    onClick = {
+                        if (newKeyword.isNotBlank()) {
+                            val custom = if (isCustomCat && customCatName.isNotBlank()) customCatName.trim() else null
+                            onAddRule(newKeyword.trim(), selectedCatId, custom)
+                            newKeyword = ""
+                            customCatName = ""
+                            isCustomCat = false
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Text("Add Rule", fontSize = 13.sp)
                 }
 
                 if (rules.isEmpty()) {
@@ -2020,7 +2121,7 @@ fun CategoryRulesDialog(
                 } else {
                     LazyColumn(
                         verticalArrangement = Arrangement.spacedBy(6.dp),
-                        modifier = Modifier.height(240.dp)
+                        modifier = Modifier.height(200.dp)
                     ) {
                         items(rules) { rule ->
                             val catName = categories.find { it.id == rule.targetCategoryId }?.name ?: "Category #${rule.targetCategoryId}"
@@ -2059,13 +2160,15 @@ fun ManualEntryDialog(
     accounts: List<Account>,
     categories: List<Category>,
     onDismiss: () -> Unit,
-    onSave: (amount: Double, merchant: String, type: TransactionType, categoryId: Long, accountId: Long, isSplit: Boolean, reimbursementAmount: Double, peerName: String?) -> Unit
+    onSave: (amount: Double, merchant: String, type: TransactionType, categoryId: Long, accountId: Long, isSplit: Boolean, reimbursementAmount: Double, peerName: String?, customCat: String?) -> Unit
 ) {
     var amountText by remember { mutableStateOf("") }
     var merchantText by remember { mutableStateOf("") }
     var selectedType by remember { mutableStateOf(TransactionType.EXPENSE) }
     var selectedCatId by remember { mutableStateOf(categories.firstOrNull()?.id ?: 1L) }
     var selectedAccId by remember { mutableStateOf(accounts.firstOrNull()?.id ?: 1L) }
+    var isCustomCat by remember { mutableStateOf(false) }
+    var customCatName by remember { mutableStateOf("") }
     var isSplitEnabled by remember { mutableStateOf(false) }
     var reimbursementText by remember { mutableStateOf("") }
     var peerNameText by remember { mutableStateOf("") }
@@ -2081,13 +2184,14 @@ fun ManualEntryDialog(
             shape = RoundedCornerShape(24.dp),
             color = MaterialTheme.colorScheme.surface,
             tonalElevation = 6.dp,
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(600.dp)
         ) {
             Column(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(20.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                    .fillMaxSize()
+                    .padding(20.dp)
             ) {
                 Text(
                     text = "Add Transaction",
@@ -2096,165 +2200,208 @@ fun ManualEntryDialog(
                     color = MaterialTheme.colorScheme.onSurface
                 )
 
-                // Type Toggle
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    FilterChip(
-                        selected = selectedType == TransactionType.EXPENSE,
-                        onClick = { selectedType = TransactionType.EXPENSE },
-                        label = { Text("Expense") },
-                        modifier = Modifier.weight(1f)
-                    )
-                    FilterChip(
-                        selected = selectedType == TransactionType.INCOME,
-                        onClick = { selectedType = TransactionType.INCOME },
-                        label = { Text("Income") },
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-
-                // Amount
-                OutlinedTextField(
-                    value = amountText,
-                    onValueChange = {
-                        amountText = it
-                        errorMessage = null
-                    },
-                    label = { Text("Amount (₹)") },
-                    placeholder = { Text("0.00") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    shape = RoundedCornerShape(12.dp)
-                )
-
-                // Merchant
-                OutlinedTextField(
-                    value = merchantText,
-                    onValueChange = {
-                        merchantText = it
-                        errorMessage = null
-                    },
-                    label = { Text(if (selectedType == TransactionType.EXPENSE) "Merchant / Spent on" else "Source / Income from") },
-                    placeholder = { Text("e.g. Starbucks, Grocery, Freelance") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    shape = RoundedCornerShape(12.dp)
-                )
-
-                // Category Selector
-                ExposedDropdownMenuBox(
-                    expanded = categoryDropdownExpanded,
-                    onExpandedChange = { categoryDropdownExpanded = !categoryDropdownExpanded }
-                ) {
-                    OutlinedTextField(
-                        value = currentCat?.name ?: "Category",
-                        onValueChange = {},
-                        readOnly = true,
-                        label = { Text("Category") },
-                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = categoryDropdownExpanded) },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable),
-                        shape = RoundedCornerShape(12.dp)
-                    )
-
-                    ExposedDropdownMenu(
-                        expanded = categoryDropdownExpanded,
-                        onDismissRequest = { categoryDropdownExpanded = false }
-                    ) {
-                        categories.forEach { category ->
-                            DropdownMenuItem(
-                                text = { Text(category.name) },
-                                onClick = {
-                                    selectedCatId = category.id
-                                    categoryDropdownExpanded = false
-                                }
-                            )
-                        }
-                    }
-                }
-
-                // Account Selector
-                ExposedDropdownMenuBox(
-                    expanded = accountDropdownExpanded,
-                    onExpandedChange = { accountDropdownExpanded = !accountDropdownExpanded }
-                ) {
-                    OutlinedTextField(
-                        value = currentAcc?.let { it.nickname ?: it.name } ?: "Account",
-                        onValueChange = {},
-                        readOnly = true,
-                        label = { Text("Account") },
-                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = accountDropdownExpanded) },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable),
-                        shape = RoundedCornerShape(12.dp)
-                    )
-
-                    ExposedDropdownMenu(
-                        expanded = accountDropdownExpanded,
-                        onDismissRequest = { accountDropdownExpanded = false }
-                    ) {
-                        accounts.forEach { account ->
-                            DropdownMenuItem(
-                                text = { Text(account.nickname ?: account.name) },
-                                onClick = {
-                                    selectedAccId = account.id
-                                    accountDropdownExpanded = false
-                                }
-                            )
-                        }
-                    }
-                }
-
-                // Split Expense / Reimbursement Toggle (Only for expenses)
-                if (selectedType == TransactionType.EXPENSE) {
+                    // Type Toggle
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Text("Split expense (Reimbursement)", fontSize = 13.sp, fontWeight = FontWeight.Medium)
-                        Switch(
-                            checked = isSplitEnabled,
-                            onCheckedChange = { isSplitEnabled = it }
+                        FilterChip(
+                            selected = selectedType == TransactionType.EXPENSE,
+                            onClick = { selectedType = TransactionType.EXPENSE },
+                            label = { Text("Expense") },
+                            modifier = Modifier.weight(1f)
+                        )
+                        FilterChip(
+                            selected = selectedType == TransactionType.INCOME,
+                            onClick = { selectedType = TransactionType.INCOME },
+                            label = { Text("Income") },
+                            modifier = Modifier.weight(1f)
                         )
                     }
 
-                    if (isSplitEnabled) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    // Amount
+                    OutlinedTextField(
+                        value = amountText,
+                        onValueChange = {
+                            amountText = it
+                            errorMessage = null
+                        },
+                        label = { Text("Amount (₹)") },
+                        placeholder = { Text("0.00") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp)
+                    )
+
+                    // Merchant
+                    OutlinedTextField(
+                        value = merchantText,
+                        onValueChange = {
+                            merchantText = it
+                            errorMessage = null
+                        },
+                        label = { Text(if (selectedType == TransactionType.EXPENSE) "Merchant / Spent on" else "Source / Income from") },
+                        placeholder = { Text("e.g. Starbucks, Groww, Freelance") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp)
+                    )
+
+                    // Category Selector
+                    if (!isCustomCat) {
+                        ExposedDropdownMenuBox(
+                            expanded = categoryDropdownExpanded,
+                            onExpandedChange = { categoryDropdownExpanded = !categoryDropdownExpanded }
                         ) {
                             OutlinedTextField(
-                                value = peerNameText,
-                                onValueChange = { peerNameText = it },
-                                label = { Text("Friend Name") },
-                                modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(10.dp)
+                                value = currentCat?.name ?: "Category",
+                                onValueChange = {},
+                                readOnly = true,
+                                label = { Text("Category") },
+                                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = categoryDropdownExpanded) },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable),
+                                shape = RoundedCornerShape(12.dp)
                             )
-                            OutlinedTextField(
-                                value = reimbursementText,
-                                onValueChange = { reimbursementText = it },
-                                label = { Text("Owed (₹)") },
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                                modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(10.dp)
+
+                            ExposedDropdownMenu(
+                                expanded = categoryDropdownExpanded,
+                                onDismissRequest = { categoryDropdownExpanded = false }
+                            ) {
+                                categories.forEach { category ->
+                                    DropdownMenuItem(
+                                        text = { Text(category.name) },
+                                        onClick = {
+                                            selectedCatId = category.id
+                                            isCustomCat = false
+                                            categoryDropdownExpanded = false
+                                        }
+                                    )
+                                }
+                                HorizontalDivider()
+                                DropdownMenuItem(
+                                    text = {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Icon(Icons.Default.Add, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text("+ Add Custom Category...", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
+                                        }
+                                    },
+                                    onClick = {
+                                        isCustomCat = true
+                                        categoryDropdownExpanded = false
+                                    }
+                                )
+                            }
+                        }
+                    } else {
+                        OutlinedTextField(
+                            value = customCatName,
+                            onValueChange = { customCatName = it },
+                            label = { Text("New Custom Category Name") },
+                            placeholder = { Text("e.g. Investment, KSFE, Pet Care") },
+                            singleLine = true,
+                            trailingIcon = {
+                                IconButton(onClick = { isCustomCat = false }) {
+                                    Icon(Icons.Default.Close, contentDescription = "Cancel Custom Category")
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp)
+                        )
+                    }
+
+                    // Account Selector
+                    ExposedDropdownMenuBox(
+                        expanded = accountDropdownExpanded,
+                        onExpandedChange = { accountDropdownExpanded = !accountDropdownExpanded }
+                    ) {
+                        OutlinedTextField(
+                            value = currentAcc?.let { it.nickname ?: it.name } ?: "Account",
+                            onValueChange = {},
+                            readOnly = true,
+                            label = { Text("Account") },
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = accountDropdownExpanded) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable),
+                            shape = RoundedCornerShape(12.dp)
+                        )
+
+                        ExposedDropdownMenu(
+                            expanded = accountDropdownExpanded,
+                            onDismissRequest = { accountDropdownExpanded = false }
+                        ) {
+                            accounts.forEach { account ->
+                                DropdownMenuItem(
+                                    text = { Text(account.nickname ?: account.name) },
+                                    onClick = {
+                                        selectedAccId = account.id
+                                        accountDropdownExpanded = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+
+                    // Split Expense / Reimbursement Toggle (Only for expenses)
+                    if (selectedType == TransactionType.EXPENSE) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("Split expense (Reimbursement)", fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                            Switch(
+                                checked = isSplitEnabled,
+                                onCheckedChange = { isSplitEnabled = it }
                             )
                         }
+
+                        if (isSplitEnabled) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                OutlinedTextField(
+                                    value = peerNameText,
+                                    onValueChange = { peerNameText = it },
+                                    label = { Text("Friend Name") },
+                                    modifier = Modifier.weight(1f),
+                                    shape = RoundedCornerShape(10.dp)
+                                )
+                                OutlinedTextField(
+                                    value = reimbursementText,
+                                    onValueChange = { reimbursementText = it },
+                                    label = { Text("Owed (₹)") },
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                    modifier = Modifier.weight(1f),
+                                    shape = RoundedCornerShape(10.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    if (errorMessage != null) {
+                        Text(
+                            text = errorMessage ?: "",
+                            color = MaterialTheme.colorScheme.error,
+                            fontSize = 12.sp
+                        )
                     }
                 }
 
-                if (errorMessage != null) {
-                    Text(
-                        text = errorMessage ?: "",
-                        color = MaterialTheme.colorScheme.error,
-                        fontSize = 12.sp
-                    )
-                }
+                Spacer(modifier = Modifier.height(10.dp))
 
                 // Action Buttons
                 Row(
@@ -2278,6 +2425,7 @@ fun ManualEntryDialog(
                             }
                             val reimbursementVal = if (isSplitEnabled) reimbursementText.toDoubleOrNull() ?: 0.0 else 0.0
                             val peerVal = if (isSplitEnabled) peerNameText.trim().ifEmpty { "Friend" } else null
+                            val custom = if (isCustomCat && customCatName.isNotBlank()) customCatName.trim() else null
 
                             onSave(
                                 amountVal,
@@ -2287,7 +2435,8 @@ fun ManualEntryDialog(
                                 selectedAccId,
                                 isSplitEnabled,
                                 reimbursementVal,
-                                peerVal
+                                peerVal,
+                                custom
                             )
                         },
                         shape = RoundedCornerShape(10.dp)

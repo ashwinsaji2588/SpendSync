@@ -23,6 +23,7 @@ import com.example.expensetracker.domain.CsvExporter
 import com.example.expensetracker.domain.CsvImportResult
 import com.example.expensetracker.domain.CsvStatementParser
 import com.example.expensetracker.domain.DetectedSubscription
+import com.example.expensetracker.domain.GeminiService
 import com.example.expensetracker.domain.HistoricalSmsScanner
 import com.example.expensetracker.domain.SubscriptionDetector
 import com.google.firebase.auth.FirebaseAuth
@@ -514,6 +515,45 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private val geminiService = GeminiService(application)
+
+    fun getGeminiApiKey(): String = geminiService.getApiKey()
+    fun setGeminiApiKey(key: String) = geminiService.setApiKey(key)
+
+    suspend fun getOrCreateCategory(name: String): Long {
+        val clean = name.trim().ifEmpty { "General" }
+        val existing = categoryDao.getCategoryByName(clean)
+        if (existing != null) return existing.id
+        val colors = listOf("#FF7043", "#66BB6A", "#29B6F6", "#AB47BC", "#FFA726", "#EF5350", "#7E57C2", "#26A69A", "#42A5F5", "#8D6E63", "#E91E63")
+        val randomColor = colors.random()
+        val newId = categoryDao.insertCategory(Category(name = clean, colorHex = randomColor))
+        return if (newId > 0) newId else (categoryDao.getCategoryByName(clean)?.id ?: 7L)
+    }
+
+    suspend fun askGeminiFinancialAdvisor(query: String): String {
+        val currentTransactions = allTransactions.value
+        val summary = monthlySpendingSummary.value
+        val categories = categoryBreakdown.value
+        val subscriptions = detectedSubscriptions.value
+        val pendingOwed = totalPendingSettlements.value
+
+        val contextBuilder = StringBuilder()
+        contextBuilder.append("Current Month: ${selectedMonth.value.label}\n")
+        contextBuilder.append("Total Net Spending: ₹${String.format(Locale.US, "%.2f", summary.netExpense)}\n")
+        contextBuilder.append("Total Gross Spending: ₹${String.format(Locale.US, "%.2f", summary.grossExpense)}\n")
+        contextBuilder.append("Total Money Owed via Splits: ₹${String.format(Locale.US, "%.2f", pendingOwed)}\n")
+        contextBuilder.append("Category Breakdown:\n")
+        categories.forEach {
+            contextBuilder.append("- ${it.categoryName}: ₹${String.format(Locale.US, "%.2f", it.totalAmount)} (${String.format(Locale.US, "%.1f", it.percentage)}%)\n")
+        }
+        contextBuilder.append("Active Subscriptions:\n")
+        subscriptions.forEach {
+            contextBuilder.append("- ${it.merchantName}: ₹${String.format(Locale.US, "%.2f", it.averageAmount)} (Every ~${it.cadenceDays} days)\n")
+        }
+
+        return geminiService.answerFinancialQuery(contextBuilder.toString(), query)
+    }
+
     /**
      * Updates all fields of a transaction with live recalculation and optional auto-learning rule.
      */
@@ -529,9 +569,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         peerName: String?,
         notes: String?,
         saveRule: Boolean,
-        keyword: String
+        keyword: String,
+        customCategoryName: String? = null
     ) {
         viewModelScope.launch {
+            val resolvedCategoryId = if (!customCategoryName.isNullOrBlank()) {
+                getOrCreateCategory(customCategoryName)
+            } else {
+                categoryId
+            }
+
             transactionDao.insertTransaction(
                 TransactionEntity(
                     id = transactionId,
@@ -540,7 +587,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     timestamp = System.currentTimeMillis(),
                     transactionType = type,
                     accountId = accountId,
-                    categoryId = categoryId,
+                    categoryId = resolvedCategoryId,
                     isSplit = isSplit,
                     reimbursementAmount = reimbursementAmount,
                     settled = false,
@@ -553,21 +600,31 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 categoryRuleDao.insertRule(
                     CategoryRule(
                         merchantKeyword = keyword.trim().lowercase(Locale.ROOT),
-                        targetCategoryId = categoryId
+                        targetCategoryId = resolvedCategoryId
                     )
                 )
             }
 
-            checkCategoryBudgetAlert(categoryId)
+            checkCategoryBudgetAlert(resolvedCategoryId)
         }
     }
 
-    fun saveCategoryRule(merchantKeyword: String, targetCategoryId: Long) {
+    fun saveCategoryRule(
+        merchantKeyword: String,
+        targetCategoryId: Long,
+        customCategoryName: String? = null
+    ) {
         viewModelScope.launch {
+            val resolvedCategoryId = if (!customCategoryName.isNullOrBlank()) {
+                getOrCreateCategory(customCategoryName)
+            } else {
+                targetCategoryId
+            }
+
             categoryRuleDao.insertRule(
                 CategoryRule(
                     merchantKeyword = merchantKeyword.trim().lowercase(Locale.ROOT),
-                    targetCategoryId = targetCategoryId
+                    targetCategoryId = resolvedCategoryId
                 )
             )
         }
@@ -595,9 +652,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         isSplit: Boolean = false,
         reimbursementAmount: Double = 0.0,
         peerName: String? = null,
-        notes: String? = null
+        notes: String? = null,
+        customCategoryName: String? = null
     ) {
         viewModelScope.launch {
+            val resolvedCategoryId = if (!customCategoryName.isNullOrBlank()) {
+                getOrCreateCategory(customCategoryName)
+            } else {
+                categoryId
+            }
+
             transactionDao.insertTransaction(
                 TransactionEntity(
                     amount = amount,
@@ -605,7 +669,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     timestamp = timestamp,
                     transactionType = type,
                     accountId = accountId,
-                    categoryId = categoryId,
+                    categoryId = resolvedCategoryId,
                     isSplit = isSplit,
                     reimbursementAmount = reimbursementAmount,
                     settled = false,
@@ -615,7 +679,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             )
 
             if (type == TransactionType.EXPENSE) {
-                checkCategoryBudgetAlert(categoryId)
+                checkCategoryBudgetAlert(resolvedCategoryId)
             }
         }
     }

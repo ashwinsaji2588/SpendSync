@@ -14,6 +14,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.Button
@@ -71,7 +72,8 @@ fun FullEditTransactionDialog(
         peerName: String?,
         notes: String?,
         saveRule: Boolean,
-        keyword: String
+        keyword: String,
+        customCategoryName: String?
     ) -> Unit,
     onDelete: (Long) -> Unit
 ) {
@@ -82,6 +84,9 @@ fun FullEditTransactionDialog(
     var selectedType by remember { mutableStateOf(t.transactionType) }
     var selectedCatId by remember { mutableStateOf(t.categoryId) }
     var selectedAccId by remember { mutableStateOf(t.accountId) }
+    var isCreatingCustomCategory by remember { mutableStateOf(false) }
+    var customCategoryText by remember { mutableStateOf("") }
+
     var isSplitEnabled by remember { mutableStateOf(t.isSplit) }
     var reimbursementText by remember { mutableStateOf(if (t.reimbursementAmount > 0) String.format(Locale.US, "%.2f", t.reimbursementAmount) else "") }
     var peerNameText by remember { mutableStateOf(t.peerName ?: "") }
@@ -104,7 +109,7 @@ fun FullEditTransactionDialog(
             tonalElevation = 6.dp,
             modifier = Modifier
                 .fillMaxWidth()
-                .height(580.dp)
+                .height(600.dp)
         ) {
             Column(
                 modifier = Modifier
@@ -183,37 +188,69 @@ fun FullEditTransactionDialog(
                         shape = RoundedCornerShape(12.dp)
                     )
 
-                    // Category Selector
-                    ExposedDropdownMenuBox(
-                        expanded = categoryDropdownExpanded,
-                        onExpandedChange = { categoryDropdownExpanded = !categoryDropdownExpanded }
-                    ) {
-                        OutlinedTextField(
-                            value = currentCat?.name ?: "Select Category",
-                            onValueChange = {},
-                            readOnly = true,
-                            label = { Text("Category") },
-                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = categoryDropdownExpanded) },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable),
-                            shape = RoundedCornerShape(12.dp)
-                        )
-
-                        ExposedDropdownMenu(
+                    // Category Selector & Custom Category Creation
+                    if (!isCreatingCustomCategory) {
+                        ExposedDropdownMenuBox(
                             expanded = categoryDropdownExpanded,
-                            onDismissRequest = { categoryDropdownExpanded = false }
+                            onExpandedChange = { categoryDropdownExpanded = !categoryDropdownExpanded }
                         ) {
-                            categories.forEach { category ->
+                            OutlinedTextField(
+                                value = currentCat?.name ?: "Select Category",
+                                onValueChange = {},
+                                readOnly = true,
+                                label = { Text("Category") },
+                                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = categoryDropdownExpanded) },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable),
+                                shape = RoundedCornerShape(12.dp)
+                            )
+
+                            ExposedDropdownMenu(
+                                expanded = categoryDropdownExpanded,
+                                onDismissRequest = { categoryDropdownExpanded = false }
+                            ) {
+                                categories.forEach { category ->
+                                    DropdownMenuItem(
+                                        text = { Text(category.name) },
+                                        onClick = {
+                                            selectedCatId = category.id
+                                            isCreatingCustomCategory = false
+                                            categoryDropdownExpanded = false
+                                        }
+                                    )
+                                }
+                                HorizontalDivider()
                                 DropdownMenuItem(
-                                    text = { Text(category.name) },
+                                    text = {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Icon(Icons.Default.Add, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text("+ Add Custom Category...", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
+                                        }
+                                    },
                                     onClick = {
-                                        selectedCatId = category.id
+                                        isCreatingCustomCategory = true
                                         categoryDropdownExpanded = false
                                     }
                                 )
                             }
                         }
+                    } else {
+                        OutlinedTextField(
+                            value = customCategoryText,
+                            onValueChange = { customCategoryText = it },
+                            label = { Text("New Custom Category Name") },
+                            placeholder = { Text("e.g. Investment, KSFE, Donations") },
+                            singleLine = true,
+                            trailingIcon = {
+                                IconButton(onClick = { isCreatingCustomCategory = false }) {
+                                    Icon(Icons.Default.Close, contentDescription = "Cancel Custom Category")
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp)
+                        )
                     }
 
                     // Account Selector
@@ -304,7 +341,7 @@ fun FullEditTransactionDialog(
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = "Auto-learn: Always categorize matching transactions as '${currentCat?.name}'",
+                            text = "Auto-learn: Always categorize matching transactions as '${if (isCreatingCustomCategory && customCategoryText.isNotBlank()) customCategoryText else currentCat?.name}'",
                             fontSize = 12.sp
                         )
                     }
@@ -362,6 +399,10 @@ fun FullEditTransactionDialog(
                             val reimb = if (isSplitEnabled) reimbursementText.toDoubleOrNull() ?: 0.0 else 0.0
                             val peer = if (isSplitEnabled) peerNameText.trim().ifEmpty { "Friend" } else null
 
+                            val customCat = if (isCreatingCustomCategory && customCategoryText.isNotBlank()) {
+                                customCategoryText.trim()
+                            } else null
+
                             onSave(
                                 t.id,
                                 merch,
@@ -374,7 +415,8 @@ fun FullEditTransactionDialog(
                                 peer,
                                 notesText.trim().ifEmpty { null },
                                 saveRuleCheckbox,
-                                keywordText
+                                keywordText,
+                                customCat
                             )
                         },
                         shape = RoundedCornerShape(10.dp)
