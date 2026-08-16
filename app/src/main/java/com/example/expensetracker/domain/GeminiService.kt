@@ -19,7 +19,9 @@ class GeminiService(private val context: Context) {
     private val prefs = context.getSharedPreferences("expense_tracker_prefs", Context.MODE_PRIVATE)
 
     fun getApiKey(): String {
-        return prefs.getString(PREF_GEMINI_API_KEY, "") ?: ""
+        val saved = prefs.getString(PREF_GEMINI_API_KEY, "") ?: ""
+        if (saved.isNotBlank()) return saved
+        return com.example.expensetracker.BuildConfig.GEMINI_API_KEY
     }
 
     fun setApiKey(apiKey: String) {
