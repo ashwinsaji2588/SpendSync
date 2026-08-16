@@ -4,19 +4,29 @@ import android.Manifest
 import android.app.Application
 import android.content.Context
 import android.content.pm.PackageManager
+import android.net.Uri
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.expensetracker.data.Account
 import com.example.expensetracker.data.AccountType
 import com.example.expensetracker.data.AppDatabase
+import com.example.expensetracker.data.Budget
+import com.example.expensetracker.data.BudgetWithCategory
 import com.example.expensetracker.data.Category
 import com.example.expensetracker.data.CategoryRule
 import com.example.expensetracker.data.TransactionEntity
 import com.example.expensetracker.data.TransactionType
 import com.example.expensetracker.data.TransactionWithDetails
+import com.example.expensetracker.domain.BudgetNotificationHelper
+import com.example.expensetracker.domain.CsvExporter
+import com.example.expensetracker.domain.CsvImportResult
+import com.example.expensetracker.domain.CsvStatementParser
+import com.example.expensetracker.domain.DetectedSubscription
 import com.example.expensetracker.domain.HistoricalSmsScanner
+import com.example.expensetracker.domain.SubscriptionDetector
 import com.google.firebase.auth.FirebaseAuth
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -61,8 +71,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val accountDao = db.accountDao()
     private val categoryDao = db.categoryDao()
     private val categoryRuleDao = db.categoryRuleDao()
+    private val budgetDao = db.budgetDao()
 
     private val smsScanner = HistoricalSmsScanner(application, db)
+    private val csvParser = CsvStatementParser(application, db)
+    private val csvExporter = CsvExporter(application)
+    private val budgetNotifier = BudgetNotificationHelper(application)
+    private val subscriptionDetector = SubscriptionDetector()
+
     private val prefs = application.getSharedPreferences("expense_tracker_prefs", Context.MODE_PRIVATE)
 
     // Dark theme state: null = system default, true = dark mode, false = light mode
@@ -71,11 +87,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     )
     val isDarkMode: StateFlow<Boolean?> = _isDarkMode.asStateFlow()
 
+    // Biometric lock preference
+    private val _isBiometricEnabled = MutableStateFlow(
+        prefs.getBoolean(PREF_BIOMETRIC_ENABLED, false)
+    )
+    val isBiometricEnabled: StateFlow<Boolean> = _isBiometricEnabled.asStateFlow()
+
     private val _isScanning = MutableStateFlow(false)
     val isScanning: StateFlow<Boolean> = _isScanning.asStateFlow()
 
     private val _scanMessage = MutableStateFlow<String?>(null)
     val scanMessage: StateFlow<String?> = _scanMessage.asStateFlow()
+
+    private val _importMessage = MutableStateFlow<CsvImportResult?>(null)
+    val importMessage: StateFlow<CsvImportResult?> = _importMessage.asStateFlow()
+
+    // Universal Search & Custom Date Range Filter
+    private val _searchQuery = MutableStateFlow("")
+    val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
+
+    private val _customDateRange = MutableStateFlow<Pair<Long, Long>?>(null)
+    val customDateRange: StateFlow<Pair<Long, Long>?> = _customDateRange.asStateFlow()
 
     val availableMonths: List<MonthOption> = generateAvailableMonths()
 
@@ -106,22 +138,65 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             initialValue = emptyList()
         )
 
+    val allBudgets: StateFlow<List<BudgetWithCategory>> = budgetDao.getAllBudgetsWithCategory()
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyList()
+        )
+
+    // Reactive Transactions Feed filtered by Month / Custom Date, Account, and Search Query
     val allTransactions: StateFlow<List<TransactionWithDetails>> = combine(
         _selectedMonth,
-        _selectedAccount
-    ) { month, account -> month to account }
-        .flatMapLatest { (month, account) ->
-            if (account == null) {
+        _selectedAccount,
+        _customDateRange,
+        _searchQuery
+    ) { month, account, dateRange, query ->
+        DateFilterParams(month, account, dateRange, query)
+    }
+        .flatMapLatest { params ->
+            val startTs = params.customDateRange?.first ?: params.month.startTimestamp
+            val endTs = params.customDateRange?.second ?: params.month.endTimestamp
+
+            val flow = if (params.account == null) {
+                transactionDao.getTransactionsWithDetailsForDateRange(startTs, endTs)
+            } else {
+                transactionDao.getTransactionsWithDetailsForAccountAndDateRange(params.account.id, startTs, endTs)
+            }
+
+            flow.map { list ->
+                if (params.query.isBlank()) {
+                    list
+                } else {
+                    val q = params.query.trim().lowercase(Locale.ROOT)
+                    list.filter { item ->
+                        item.transaction.merchantName.lowercase(Locale.ROOT).contains(q) ||
+                                (item.category?.name?.lowercase(Locale.ROOT)?.contains(q) == true) ||
+                                (item.account?.name?.lowercase(Locale.ROOT)?.contains(q) == true) ||
+                                (item.account?.nickname?.lowercase(Locale.ROOT)?.contains(q) == true) ||
+                                (item.transaction.notes?.lowercase(Locale.ROOT)?.contains(q) == true) ||
+                                item.transaction.amount.toString().contains(q)
+                    }
+                }
+            }
+        }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyList()
+        )
+
+    // Previous month transactions for MoM comparison chart
+    val previousMonthTransactions: StateFlow<List<TransactionWithDetails>> = _selectedMonth
+        .flatMapLatest { currentMonth ->
+            val prevMonthOption = availableMonths.getOrNull(availableMonths.indexOf(currentMonth) + 1)
+            if (prevMonthOption != null) {
                 transactionDao.getTransactionsWithDetailsForDateRange(
-                    month.startTimestamp,
-                    month.endTimestamp
+                    prevMonthOption.startTimestamp,
+                    prevMonthOption.endTimestamp
                 )
             } else {
-                transactionDao.getTransactionsWithDetailsForAccountAndDateRange(
-                    account.id,
-                    month.startTimestamp,
-                    month.endTimestamp
-                )
+                transactionDao.getTransactionsWithDetailsForDateRange(0, 0)
             }
         }
         .stateIn(
@@ -183,6 +258,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             initialValue = emptyList()
         )
 
+    // Detected Subscriptions & Recurring Bills
+    val detectedSubscriptions: StateFlow<List<DetectedSubscription>> = transactionDao
+        .getAllTransactionsWithDetails()
+        .map { list -> subscriptionDetector.detectSubscriptions(list) }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyList()
+        )
+
     val pendingSettlements: StateFlow<List<TransactionWithDetails>> = transactionDao
         .getPendingSettlements()
         .stateIn(
@@ -215,6 +300,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun setSearchQuery(query: String) {
+        _searchQuery.value = query
+    }
+
+    fun setCustomDateRange(range: Pair<Long, Long>?) {
+        _customDateRange.value = range
+    }
+
     fun setThemeMode(isDark: Boolean?) {
         _isDarkMode.value = isDark
         if (isDark == null) {
@@ -222,6 +315,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         } else {
             prefs.edit().putBoolean(PREF_DARK_MODE, isDark).apply()
         }
+    }
+
+    fun setBiometricEnabled(enabled: Boolean) {
+        _isBiometricEnabled.value = enabled
+        prefs.edit().putBoolean(PREF_BIOMETRIC_ENABLED, enabled).apply()
     }
 
     fun setPersistedLoggedIn(loggedIn: Boolean) {
@@ -244,6 +342,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun selectMonth(month: MonthOption) {
         _selectedMonth.value = month
+        _customDateRange.value = null
     }
 
     fun selectAccount(account: Account?) {
@@ -275,6 +374,60 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun importCsvStatement(uri: Uri, targetAccountId: Long? = null) {
+        viewModelScope.launch {
+            _isScanning.value = true
+            try {
+                val result = csvParser.importCsvFromUri(uri, targetAccountId)
+                _importMessage.value = result
+            } catch (e: Exception) {
+                _importMessage.value = CsvImportResult(0, 0, 0, 1, "Import failed: ${e.localizedMessage}")
+            } finally {
+                _isScanning.value = false
+            }
+        }
+    }
+
+    fun clearImportMessage() {
+        _importMessage.value = null
+    }
+
+    fun exportTransactionsCsv(uri: Uri, onResult: (Boolean) -> Unit) {
+        viewModelScope.launch {
+            val list = allTransactions.value
+            val success = csvExporter.exportTransactionsToUri(uri, list)
+            onResult(success)
+        }
+    }
+
+    fun saveCategoryBudget(categoryId: Long, monthlyLimit: Double) {
+        viewModelScope.launch {
+            budgetDao.insertOrUpdateBudget(
+                Budget(categoryId = categoryId, monthlyLimit = monthlyLimit)
+            )
+            checkCategoryBudgetAlert(categoryId)
+        }
+    }
+
+    fun deleteCategoryBudget(categoryId: Long) {
+        viewModelScope.launch {
+            val existing = budgetDao.getBudgetForCategory(categoryId)
+            if (existing != null) {
+                budgetDao.deleteBudget(existing)
+            }
+        }
+    }
+
+    private suspend fun checkCategoryBudgetAlert(categoryId: Long) {
+        val budget = budgetDao.getBudgetForCategory(categoryId) ?: return
+        val category = categoryDao.getCategoryById(categoryId) ?: return
+        val currentMonthTxns = allTransactions.value.filter {
+            it.category?.id == categoryId && it.transaction.transactionType == TransactionType.EXPENSE
+        }
+        val spent = currentMonthTxns.sumOf { it.transaction.amount - it.transaction.reimbursementAmount }
+        budgetNotifier.checkAndNotifyBudget(category.name, spent, budget.monthlyLimit)
+    }
+
     fun onPermissionsResult(allGranted: Boolean) {
         if (allGranted) {
             val hasCompletedInitialScan = prefs.getBoolean(PREF_INITIAL_SCAN_DONE, false)
@@ -302,24 +455,50 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * Updates transaction category and optionally saves an auto-learning rule.
+     * Updates all fields of a transaction with live recalculation and optional auto-learning rule.
      */
-    fun updateTransactionCategory(
+    fun updateTransactionFull(
         transactionId: Long,
-        newCategoryId: Long,
-        saveRule: Boolean = false,
-        merchantKeyword: String? = null
+        merchantName: String,
+        amount: Double,
+        type: TransactionType,
+        categoryId: Long,
+        accountId: Long,
+        isSplit: Boolean,
+        reimbursementAmount: Double,
+        peerName: String?,
+        notes: String?,
+        saveRule: Boolean,
+        keyword: String
     ) {
         viewModelScope.launch {
-            transactionDao.updateTransactionCategory(transactionId, newCategoryId)
-            if (saveRule && !merchantKeyword.isNullOrBlank()) {
+            transactionDao.insertTransaction(
+                TransactionEntity(
+                    id = transactionId,
+                    amount = amount,
+                    merchantName = merchantName,
+                    timestamp = System.currentTimeMillis(),
+                    transactionType = type,
+                    accountId = accountId,
+                    categoryId = categoryId,
+                    isSplit = isSplit,
+                    reimbursementAmount = reimbursementAmount,
+                    settled = false,
+                    peerName = peerName,
+                    notes = notes
+                )
+            )
+
+            if (saveRule && keyword.isNotBlank()) {
                 categoryRuleDao.insertRule(
                     CategoryRule(
-                        merchantKeyword = merchantKeyword.trim().lowercase(Locale.ROOT),
-                        targetCategoryId = newCategoryId
+                        merchantKeyword = keyword.trim().lowercase(Locale.ROOT),
+                        targetCategoryId = categoryId
                     )
                 )
             }
+
+            checkCategoryBudgetAlert(categoryId)
         }
     }
 
@@ -374,6 +553,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     notes = notes
                 )
             )
+
+            if (type == TransactionType.EXPENSE) {
+                checkCategoryBudgetAlert(categoryId)
+            }
         }
     }
 
@@ -424,5 +607,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         private const val PREF_INITIAL_SCAN_DONE = "pref_initial_scan_done"
         private const val PREF_DARK_MODE = "pref_dark_mode"
         private const val PREF_IS_LOGGED_IN = "pref_is_logged_in"
+        private const val PREF_BIOMETRIC_ENABLED = "pref_biometric_enabled"
     }
 }
+
+private data class DateFilterParams(
+    val month: MonthOption,
+    val account: Account?,
+    val customDateRange: Pair<Long, Long>?,
+    val query: String
+)

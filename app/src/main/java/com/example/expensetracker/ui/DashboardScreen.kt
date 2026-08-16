@@ -5,6 +5,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.provider.Settings
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
@@ -43,10 +44,12 @@ import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.ShoppingCart
 import androidx.compose.material3.AlertDialog
@@ -112,9 +115,12 @@ import com.example.expensetracker.data.Category
 import com.example.expensetracker.data.CategoryRule
 import com.example.expensetracker.data.TransactionType
 import com.example.expensetracker.data.TransactionWithDetails
+import com.example.expensetracker.ui.components.AdvancedAnalyticsSection
+import com.example.expensetracker.ui.components.BudgetsDialog
+import com.example.expensetracker.ui.components.FullEditTransactionDialog
 import com.example.expensetracker.ui.components.SpendSyncLogo
+import com.example.expensetracker.ui.components.SubscriptionsDialog
 import kotlinx.coroutines.launch
-import java.text.NumberFormat
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -130,6 +136,7 @@ fun DashboardScreen(
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
 
     val transactions by viewModel.allTransactions.collectAsState()
+    val previousMonthTransactions by viewModel.previousMonthTransactions.collectAsState()
     val spendingSummary by viewModel.monthlySpendingSummary.collectAsState()
     val categoryBreakdown by viewModel.categoryBreakdown.collectAsState()
     val selectedMonth by viewModel.selectedMonth.collectAsState()
@@ -137,20 +144,52 @@ fun DashboardScreen(
     val allAccounts by viewModel.allAccounts.collectAsState()
     val allCategories by viewModel.allCategories.collectAsState()
     val allRules by viewModel.allRules.collectAsState()
+    val allBudgets by viewModel.allBudgets.collectAsState()
+    val detectedSubscriptions by viewModel.detectedSubscriptions.collectAsState()
     val pendingSettlements by viewModel.pendingSettlements.collectAsState()
     val totalPendingSettlements by viewModel.totalPendingSettlements.collectAsState()
     val isScanning by viewModel.isScanning.collectAsState()
     val scanMessage by viewModel.scanMessage.collectAsState()
+    val importMessage by viewModel.importMessage.collectAsState()
     val isDarkMode by viewModel.isDarkMode.collectAsState()
+    val isBiometricEnabled by viewModel.isBiometricEnabled.collectAsState()
+    val searchQuery by viewModel.searchQuery.collectAsState()
 
     var showManualAddDialog by remember { mutableStateOf(false) }
     var showRulesManagerDialog by remember { mutableStateOf(false) }
     var showSettlementsDialog by remember { mutableStateOf(false) }
+    var showBudgetsDialog by remember { mutableStateOf(false) }
+    var showSubscriptionsDialog by remember { mutableStateOf(false) }
     var showSupportDialog by remember { mutableStateOf(false) }
+    var showSearchBar by remember { mutableStateOf(false) }
     var selectedTransactionForEdit by remember { mutableStateOf<TransactionWithDetails?>(null) }
     var transactionToDelete by remember { mutableStateOf<TransactionWithDetails?>(null) }
     var selectedCategoryForDrillDown by remember { mutableStateOf<CategoryBreakdownItem?>(null) }
     var accountToEditNickname by remember { mutableStateOf<Account?>(null) }
+
+    // File Import Launcher
+    val csvImportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        uri?.let {
+            viewModel.importCsvStatement(it, selectedAccount?.id)
+        }
+    }
+
+    // CSV Export Launcher
+    val csvExportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("text/csv")
+    ) { uri: Uri? ->
+        uri?.let {
+            viewModel.exportTransactionsCsv(it) { success ->
+                Toast.makeText(
+                    context,
+                    if (success) "Statement exported successfully!" else "Failed to export CSV",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
+    }
 
     val requiredPermissions = remember {
         arrayOf(
@@ -193,7 +232,9 @@ fun DashboardScreen(
                     pendingSettlementsCount = pendingSettlements.size,
                     totalPendingAmount = totalPendingSettlements,
                     isDarkMode = isDarkMode,
+                    isBiometricEnabled = isBiometricEnabled,
                     onToggleTheme = { dark -> viewModel.setThemeMode(dark) },
+                    onToggleBiometric = { enable -> viewModel.setBiometricEnabled(enable) },
                     onAccountSelected = { account ->
                         viewModel.selectAccount(account)
                         coroutineScope.launch { drawerState.close() }
@@ -201,6 +242,22 @@ fun DashboardScreen(
                     onEditAccountNickname = { account ->
                         accountToEditNickname = account
                         coroutineScope.launch { drawerState.close() }
+                    },
+                    onOpenBudgets = {
+                        showBudgetsDialog = true
+                        coroutineScope.launch { drawerState.close() }
+                    },
+                    onOpenSubscriptions = {
+                        showSubscriptionsDialog = true
+                        coroutineScope.launch { drawerState.close() }
+                    },
+                    onImportCsv = {
+                        coroutineScope.launch { drawerState.close() }
+                        csvImportLauncher.launch(arrayOf("text/*", "application/vnd.ms-excel", "text/csv", "text/comma-separated-values"))
+                    },
+                    onExportCsv = {
+                        coroutineScope.launch { drawerState.close() }
+                        csvExportLauncher.launch("SpendSync_${selectedMonth.label.replace(" ", "_")}.csv")
                     },
                     onOpenSettlements = {
                         showSettlementsDialog = true
@@ -229,9 +286,7 @@ fun DashboardScreen(
             topBar = {
                 TopAppBar(
                     title = {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
                             SpendSyncLogo(size = 32.dp)
                             Spacer(modifier = Modifier.width(10.dp))
                             Column {
@@ -256,6 +311,15 @@ fun DashboardScreen(
                         }
                     },
                     actions = {
+                        // Search Toggle
+                        IconButton(onClick = { showSearchBar = !showSearchBar }) {
+                            Icon(
+                                imageVector = Icons.Default.Search,
+                                contentDescription = "Search Transactions",
+                                tint = if (searchQuery.isNotBlank() || showSearchBar) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onBackground
+                            )
+                        }
+
                         // Help / Support action button
                         IconButton(onClick = { showSupportDialog = true }) {
                             Icon(
@@ -321,6 +385,28 @@ fun DashboardScreen(
                             .padding(bottom = 8.dp),
                         color = MaterialTheme.colorScheme.primary,
                         trackColor = MaterialTheme.colorScheme.primaryContainer
+                    )
+                }
+
+                // Search Bar if toggled
+                AnimatedVisibility(visible = showSearchBar) {
+                    OutlinedTextField(
+                        value = searchQuery,
+                        onValueChange = { viewModel.setSearchQuery(it) },
+                        placeholder = { Text("Search by merchant, category, note, amount...") },
+                        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                        trailingIcon = {
+                            if (searchQuery.isNotBlank()) {
+                                IconButton(onClick = { viewModel.setSearchQuery("") }) {
+                                    Icon(Icons.Default.Close, contentDescription = "Clear")
+                                }
+                            }
+                        },
+                        singleLine = true,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 10.dp),
+                        shape = RoundedCornerShape(14.dp)
                     )
                 }
 
@@ -394,12 +480,43 @@ fun DashboardScreen(
                     }
                 }
 
+                // CSV Import Result Feedback Banner
+                AnimatedVisibility(visible = importMessage != null) {
+                    importMessage?.let { res ->
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = 12.dp),
+                            colors = CardDefaults.cardColors(
+                                containerColor = if (res.errorCount == 0 && res.importedCount > 0) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.secondaryContainer
+                            ),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "Statement Import Result",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 13.sp
+                                    )
+                                    Text(text = res.message, fontSize = 11.sp)
+                                }
+                                TextButton(onClick = { viewModel.clearImportMessage() }) {
+                                    Text("Dismiss", fontSize = 11.sp)
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // Scan feedback banner
-                AnimatedVisibility(
-                    visible = scanMessage != null,
-                    enter = fadeIn(),
-                    exit = fadeOut()
-                ) {
+                AnimatedVisibility(visible = scanMessage != null) {
                     scanMessage?.let { msg ->
                         Card(
                             modifier = Modifier
@@ -455,6 +572,15 @@ fun DashboardScreen(
                         )
                     }
 
+                    // Advanced Analytics (Daily Burn Rate & MoM Comparison)
+                    item {
+                        AdvancedAnalyticsSection(
+                            currentMonthTransactions = transactions,
+                            previousMonthTransactions = previousMonthTransactions,
+                            monthLabel = selectedMonth.label
+                        )
+                    }
+
                     // Pending Settlements Quick Card (if any pending)
                     if (pendingSettlements.isNotEmpty()) {
                         item {
@@ -486,7 +612,7 @@ fun DashboardScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = "Transactions",
+                                text = if (searchQuery.isNotBlank()) "Search Results" else "Transactions",
                                 fontSize = 18.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = MaterialTheme.colorScheme.onBackground
@@ -517,14 +643,14 @@ fun DashboardScreen(
                                     )
                                     Spacer(modifier = Modifier.height(10.dp))
                                     Text(
-                                        text = "No transactions found",
+                                        text = if (searchQuery.isNotBlank()) "No matching transactions found" else "No transactions for this period",
                                         fontWeight = FontWeight.Medium,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         fontSize = 14.sp
                                     )
                                     Spacer(modifier = Modifier.height(4.dp))
                                     Text(
-                                        text = "Add manual expenses or sync bank SMS",
+                                        text = "Import CSV statement, add manual expense, or scan SMS",
                                         fontSize = 12.sp,
                                         color = MaterialTheme.colorScheme.outline
                                     )
@@ -550,6 +676,47 @@ fun DashboardScreen(
                 }
             }
         }
+    }
+
+    // Full Transaction Edit Dialog
+    selectedTransactionForEdit?.let { item ->
+        FullEditTransactionDialog(
+            transactionDetails = item,
+            categories = allCategories,
+            accounts = allAccounts,
+            onDismiss = { selectedTransactionForEdit = null },
+            onSave = { id, merchant, amt, type, catId, accId, isSplit, reimb, peer, notes, saveRule, kw ->
+                viewModel.updateTransactionFull(
+                    id, merchant, amt, type, catId, accId, isSplit, reimb, peer, notes, saveRule, kw
+                )
+                selectedTransactionForEdit = null
+            },
+            onDelete = { id ->
+                viewModel.deleteTransaction(id)
+                selectedTransactionForEdit = null
+            }
+        )
+    }
+
+    // Budgets Dialog
+    if (showBudgetsDialog) {
+        BudgetsDialog(
+            categories = allCategories,
+            budgets = allBudgets,
+            spendingByCategory = categoryBreakdown,
+            monthLabel = selectedMonth.label,
+            onDismiss = { showBudgetsDialog = false },
+            onSaveBudget = { catId, limit -> viewModel.saveCategoryBudget(catId, limit) },
+            onDeleteBudget = { catId -> viewModel.deleteCategoryBudget(catId) }
+        )
+    }
+
+    // Subscriptions & Recurring Bills Dialog
+    if (showSubscriptionsDialog) {
+        SubscriptionsDialog(
+            subscriptions = detectedSubscriptions,
+            onDismiss = { showSubscriptionsDialog = false }
+        )
     }
 
     // Delete Confirmation Dialog
@@ -636,28 +803,6 @@ fun DashboardScreen(
         )
     }
 
-    // Edit Transaction Category & Auto-Learning Rule Dialog
-    selectedTransactionForEdit?.let { transactionDetails ->
-        EditTransactionCategoryDialog(
-            transactionDetails = transactionDetails,
-            categories = allCategories,
-            onDismiss = { selectedTransactionForEdit = null },
-            onSave = { newCategoryId, saveRule, keyword ->
-                viewModel.updateTransactionCategory(
-                    transactionId = transactionDetails.transaction.id,
-                    newCategoryId = newCategoryId,
-                    saveRule = saveRule,
-                    merchantKeyword = keyword
-                )
-                selectedTransactionForEdit = null
-            },
-            onDelete = {
-                viewModel.deleteTransaction(transactionDetails.transaction.id)
-                selectedTransactionForEdit = null
-            }
-        )
-    }
-
     // Pending Settlements Dialog / List
     if (showSettlementsDialog) {
         PendingSettlementsDialog(
@@ -686,9 +831,15 @@ fun SidebarContent(
     pendingSettlementsCount: Int,
     totalPendingAmount: Double,
     isDarkMode: Boolean?,
+    isBiometricEnabled: Boolean,
     onToggleTheme: (Boolean?) -> Unit,
+    onToggleBiometric: (Boolean) -> Unit,
     onAccountSelected: (Account?) -> Unit,
     onEditAccountNickname: (Account) -> Unit,
+    onOpenBudgets: () -> Unit,
+    onOpenSubscriptions: () -> Unit,
+    onImportCsv: () -> Unit,
+    onExportCsv: () -> Unit,
     onOpenSettlements: () -> Unit,
     onOpenRules: () -> Unit,
     onOpenSupport: () -> Unit,
@@ -791,13 +942,45 @@ fun SidebarContent(
         HorizontalDivider()
         Spacer(modifier = Modifier.height(14.dp))
 
-        // Settlements & Rules section
+        // Advanced Tools
         Text(
-            text = "TOOLS & SPLITS",
+            text = "FINANCIAL SUITE",
             fontSize = 11.sp,
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.outline,
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+        )
+
+        // Budgets
+        NavigationDrawerItem(
+            label = { Text("Monthly Budgets") },
+            selected = false,
+            onClick = onOpenBudgets,
+            icon = { Icon(Icons.Default.DateRange, contentDescription = null) }
+        )
+
+        // Subscriptions
+        NavigationDrawerItem(
+            label = { Text("Subscriptions & Bills") },
+            selected = false,
+            onClick = onOpenSubscriptions,
+            icon = { Icon(Icons.Default.Refresh, contentDescription = null) }
+        )
+
+        // Import CSV
+        NavigationDrawerItem(
+            label = { Text("Import Statement (CSV)") },
+            selected = false,
+            onClick = onImportCsv,
+            icon = { Icon(Icons.Default.Add, contentDescription = null) }
+        )
+
+        // Export CSV
+        NavigationDrawerItem(
+            label = { Text("Export Data (CSV)") },
+            selected = false,
+            onClick = onExportCsv,
+            icon = { Icon(Icons.Default.Share, contentDescription = null) }
         )
 
         // Pending Settlements section
@@ -821,7 +1004,7 @@ fun SidebarContent(
             },
             selected = false,
             onClick = onOpenSettlements,
-            icon = { Icon(Icons.Default.Share, contentDescription = null) }
+            icon = { Icon(Icons.Default.Person, contentDescription = null) }
         )
 
         // Auto-Rules item
@@ -852,15 +1035,43 @@ fun SidebarContent(
         HorizontalDivider()
         Spacer(modifier = Modifier.height(14.dp))
 
-        // Dark Theme Switch
+        // Security & Appearance
         Text(
-            text = "APPEARANCE",
+            text = "SECURITY & SETTINGS",
             fontSize = 11.sp,
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.outline,
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
         )
 
+        // Biometric App Lock
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column {
+                Text(
+                    text = "Biometric App Lock",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    text = if (isBiometricEnabled) "Fingerprint/PIN required" else "Off",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.outline
+                )
+            }
+            Switch(
+                checked = isBiometricEnabled,
+                onCheckedChange = { onToggleBiometric(it) }
+            )
+        }
+
+        // Dark Theme Switch
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -883,9 +1094,7 @@ fun SidebarContent(
             }
             Switch(
                 checked = isDarkMode == true,
-                onCheckedChange = { checked ->
-                    onToggleTheme(checked)
-                }
+                onCheckedChange = { onToggleTheme(it) }
             )
         }
 
@@ -1033,7 +1242,7 @@ fun MonthlyExpensesCard(
                     }
                 } else {
                     Text(
-                        text = "Auto-tracked from Bank SMS & Cash entries",
+                        text = "Auto-tracked from Bank SMS, CSV & Cash",
                         color = Color.White.copy(alpha = 0.75f),
                         fontSize = 11.sp
                     )
@@ -1386,6 +1595,20 @@ fun SupportHelpDialog(
 
                     item {
                         Text(
+                            text = "CSV Statement & Bulk File Upload",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Text(
+                            text = "Import bank statements in CSV format from your device storage. SpendSync auto-maps columns, auto-categorizes entries, and skips duplicates.",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    item {
+                        Text(
                             text = "Background SMS Permissions Troubleshooting",
                             fontWeight = FontWeight.Bold,
                             fontSize = 14.sp,
@@ -1397,20 +1620,6 @@ fun SupportHelpDialog(
                                     "2. Enable 'Autostart' or 'Background Activity'.\n" +
                                     "3. Set Battery Saver to 'No Restrictions'.\n" +
                                     "4. Ensure SMS permissions are set to 'Always Allow'.",
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-
-                    item {
-                        Text(
-                            text = "Split & Reimbursement Tracker",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 14.sp,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                        Text(
-                            text = "Enable the 'UPI Split Listener' in the sidebar to auto-intercept split requests from Google Pay and PhonePe, or split manual cash expenses with friends.",
                             fontSize = 12.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -1574,123 +1783,6 @@ fun TransactionItemCard(
             }
         }
     }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun EditTransactionCategoryDialog(
-    transactionDetails: TransactionWithDetails,
-    categories: List<Category>,
-    onDismiss: () -> Unit,
-    onSave: (newCategoryId: Long, saveRule: Boolean, keyword: String) -> Unit,
-    onDelete: () -> Unit = {}
-) {
-    var selectedCatId by remember { mutableStateOf(transactionDetails.transaction.categoryId) }
-    var saveRuleCheckbox by remember { mutableStateOf(true) }
-    var keywordText by remember { mutableStateOf(transactionDetails.transaction.merchantName) }
-    var dropdownExpanded by remember { mutableStateOf(false) }
-
-    val currentCategory = categories.find { it.id == selectedCatId } ?: categories.firstOrNull()
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Edit Transaction", fontWeight = FontWeight.Bold) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(
-                    text = "Merchant: ${transactionDetails.transaction.merchantName}",
-                    fontSize = 13.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-
-                ExposedDropdownMenuBox(
-                    expanded = dropdownExpanded,
-                    onExpandedChange = { dropdownExpanded = !dropdownExpanded }
-                ) {
-                    OutlinedTextField(
-                        value = currentCategory?.name ?: "Select Category",
-                        onValueChange = {},
-                        readOnly = true,
-                        label = { Text("Category") },
-                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = dropdownExpanded) },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable),
-                        shape = RoundedCornerShape(12.dp)
-                    )
-
-                    ExposedDropdownMenu(
-                        expanded = dropdownExpanded,
-                        onDismissRequest = { dropdownExpanded = false }
-                    ) {
-                        categories.forEach { category ->
-                            DropdownMenuItem(
-                                text = { Text(category.name) },
-                                onClick = {
-                                    selectedCatId = category.id
-                                    dropdownExpanded = false
-                                }
-                            )
-                        }
-                    }
-                }
-
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.padding(top = 4.dp)
-                ) {
-                    Checkbox(
-                        checked = saveRuleCheckbox,
-                        onCheckedChange = { saveRuleCheckbox = it }
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = "Auto-learn: Always categorize matching transactions as '${currentCategory?.name}'",
-                        fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                }
-
-                if (saveRuleCheckbox) {
-                    OutlinedTextField(
-                        value = keywordText,
-                        onValueChange = { keywordText = it },
-                        label = { Text("Merchant Keyword Rule") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(10.dp)
-                    )
-                }
-
-                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
-
-                OutlinedButton(
-                    onClick = onDelete,
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(10.dp)
-                ) {
-                    Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Delete This Transaction", fontSize = 12.sp)
-                }
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = {
-                    onSave(selectedCatId, saveRuleCheckbox, keywordText)
-                }
-            ) {
-                Text("Save Changes")
-            }
-        },
-        dismissButton = {
-            OutlinedButton(onClick = onDismiss) {
-                Text("Cancel")
-            }
-        }
-    )
 }
 
 @Composable

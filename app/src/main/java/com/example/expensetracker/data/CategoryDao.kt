@@ -23,6 +23,9 @@ interface CategoryDao {
     @Query("SELECT * FROM categories WHERE LOWER(name) = LOWER(:name) LIMIT 1")
     suspend fun getCategoryByName(name: String): Category?
 
+    @Query("SELECT * FROM categories ORDER BY name ASC")
+    suspend fun getAllCategoriesList(): List<Category>
+
     @Query("SELECT COUNT(*) FROM categories")
     suspend fun getCount(): Int
 }
