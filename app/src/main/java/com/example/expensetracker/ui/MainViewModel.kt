@@ -16,6 +16,7 @@ import com.example.expensetracker.data.TransactionEntity
 import com.example.expensetracker.data.TransactionType
 import com.example.expensetracker.data.TransactionWithDetails
 import com.example.expensetracker.domain.HistoricalSmsScanner
+import com.google.firebase.auth.FirebaseAuth
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -63,6 +64,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val smsScanner = HistoricalSmsScanner(application, db)
     private val prefs = application.getSharedPreferences("expense_tracker_prefs", Context.MODE_PRIVATE)
+
+    // Dark theme state: null = system default, true = dark mode, false = light mode
+    private val _isDarkMode = MutableStateFlow<Boolean?>(
+        if (prefs.contains(PREF_DARK_MODE)) prefs.getBoolean(PREF_DARK_MODE, false) else null
+    )
+    val isDarkMode: StateFlow<Boolean?> = _isDarkMode.asStateFlow()
 
     private val _isScanning = MutableStateFlow(false)
     val isScanning: StateFlow<Boolean> = _isScanning.asStateFlow()
@@ -208,6 +215,33 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun setThemeMode(isDark: Boolean?) {
+        _isDarkMode.value = isDark
+        if (isDark == null) {
+            prefs.edit().remove(PREF_DARK_MODE).apply()
+        } else {
+            prefs.edit().putBoolean(PREF_DARK_MODE, isDark).apply()
+        }
+    }
+
+    fun setPersistedLoggedIn(loggedIn: Boolean) {
+        prefs.edit().putBoolean(PREF_IS_LOGGED_IN, loggedIn).apply()
+    }
+
+    fun isPersistedLoggedIn(): Boolean {
+        return prefs.getBoolean(PREF_IS_LOGGED_IN, false)
+    }
+
+    fun signOut(onComplete: () -> Unit) {
+        setPersistedLoggedIn(false)
+        try {
+            FirebaseAuth.getInstance().signOut()
+        } catch (e: Exception) {
+            // Safe fallback
+        }
+        onComplete()
+    }
+
     fun selectMonth(month: MonthOption) {
         _selectedMonth.value = month
     }
@@ -252,6 +286,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun clearScanMessage() {
         _scanMessage.value = null
+    }
+
+    fun deleteTransaction(transactionId: Long) {
+        viewModelScope.launch {
+            transactionDao.deleteTransaction(transactionId)
+        }
+    }
+
+    fun updateAccountNickname(accountId: Long, nickname: String?) {
+        viewModelScope.launch {
+            val trimmed = nickname?.trim()?.ifEmpty { null }
+            accountDao.updateAccountNickname(accountId, trimmed)
+        }
     }
 
     /**
@@ -375,5 +422,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     companion object {
         private const val PREF_INITIAL_SCAN_DONE = "pref_initial_scan_done"
+        private const val PREF_DARK_MODE = "pref_dark_mode"
+        private const val PREF_IS_LOGGED_IN = "pref_is_logged_in"
     }
 }

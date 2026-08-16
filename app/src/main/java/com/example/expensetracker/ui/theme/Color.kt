@@ -2,10 +2,18 @@ package com.example.expensetracker.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-val Purple80 = Color(0xFFD0BCFF)
-val PurpleGrey80 = Color(0xFFCCC2DC)
-val Pink80 = Color(0xFFEFB8C8)
+val SpendSyncPrimary = Color(0xFF5E35B1)
+val SpendSyncSecondary = Color(0xFF7E57C2)
+val SpendSyncTertiary = Color(0xFF26A69A)
 
-val Purple40 = Color(0xFF6650a4)
-val PurpleGrey40 = Color(0xFF625b71)
-val Pink40 = Color(0xFF7D5260)
+val DarkPrimary = Color(0xFFB39DDB)
+val DarkSecondary = Color(0xFFCE93D8)
+val DarkTertiary = Color(0xFF80CBC4)
+
+val DarkBackground = Color(0xFF121212)
+val DarkSurface = Color(0xFF1E1E1E)
+val DarkSurfaceVariant = Color(0xFF2C2C2C)
+
+val LightBackground = Color(0xFFF8F9FA)
+val LightSurface = Color(0xFFFFFFFF)
+val LightSurfaceVariant = Color(0xFFF1F3F4)

@@ -17,5 +17,6 @@ data class Account(
     val id: Long = 0,
     val name: String,
     val type: AccountType = AccountType.BANK_ACCOUNT,
-    val accountNumberLast4: String? = null
+    val accountNumberLast4: String? = null,
+    val nickname: String? = null
 )

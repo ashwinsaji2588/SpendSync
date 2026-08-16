@@ -34,4 +34,7 @@ interface AccountDao {
 
     @Query("SELECT COUNT(*) FROM accounts")
     suspend fun getCount(): Int
+
+    @Query("UPDATE accounts SET nickname = :nickname WHERE id = :accountId")
+    suspend fun updateAccountNickname(accountId: Long, nickname: String?)
 }

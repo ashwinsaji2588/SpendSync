@@ -8,6 +8,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import com.example.expensetracker.ui.components.SpendSyncLogo
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -181,24 +182,7 @@ fun AuthScreen(
             verticalArrangement = Arrangement.Center
         ) {
             // SpendSync Logo & Title
-            Box(
-                modifier = Modifier
-                    .size(72.dp)
-                    .clip(CircleShape)
-                    .background(
-                        brush = Brush.linearGradient(
-                            colors = listOf(Color(0xFF4A00E0), Color(0xFF8E2DE2))
-                        )
-                    ),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Default.AccountBox,
-                    contentDescription = null,
-                    tint = Color.White,
-                    modifier = Modifier.size(38.dp)
-                )
-            }
+            SpendSyncLogo(size = 76.dp)
 
             Spacer(modifier = Modifier.height(16.dp))
 

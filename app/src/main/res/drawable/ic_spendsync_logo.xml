@@ -1,0 +1,33 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    
+    <!-- Background rounded squircle / circle with gradient -->
+    <path
+        android:pathData="M54,12 C77.196,12 96,30.804 96,54 C96,77.196 77.196,96 54,96 C30.804,96 12,77.196 12,54 C12,30.804 30.804,12 54,12 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="linear"
+                android:startX="12"
+                android:startY="12"
+                android:endX="96"
+                android:endY="96">
+                <item android:offset="0.0" android:color="#FF4A00E0"/>
+                <item android:offset="1.0" android:color="#FF8E2DE2"/>
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Wallet / Card Outline Shape -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M32,36 C30.895,36 30,36.895 30,38 L30,42 L78,42 L78,38 C78,36.895 77.105,36 76,36 L32,36 Z M30,46 L30,70 C30,72.209 31.791,74 34,74 L74,74 C76.209,74 78,72.209 78,70 L78,46 L30,46 Z M64,56 C64,54.343 65.343,53 67,53 L78,53 L78,63 L67,63 C65.343,63 64,61.657 64,60 L64,56 Z M68,58 C68,59.105 68.895,60 70,60 C71.105,60 72,59.105 72,58 C72,56.895 71.105,56 70,56 C68.895,56 68,56.895 68,58 Z" />
+
+    <!-- Sync Arrows Accent in Center -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M44,53 L50,53 C52.209,53 54,54.791 54,57 L54,58 L57,58 L52,64 L47,58 L50,58 L50,57 C50,57 50,56 49,56 L44,56 L44,53 Z" />
+</vector>

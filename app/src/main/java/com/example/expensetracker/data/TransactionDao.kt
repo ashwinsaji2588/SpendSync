@@ -65,6 +65,9 @@ interface TransactionDao {
         peerName: String?
     )
 
+    @Query("DELETE FROM transactions WHERE id = :transactionId")
+    suspend fun deleteTransaction(transactionId: Long)
+
     @Query("DELETE FROM transactions")
     suspend fun clearAll()
 }

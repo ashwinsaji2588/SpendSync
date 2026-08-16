@@ -15,7 +15,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         CategoryRule::class,
         TransactionEntity::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -39,7 +39,8 @@ abstract class AppDatabase : RoomDatabase() {
                         `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
                         `name` TEXT NOT NULL,
                         `type` TEXT NOT NULL,
-                        `accountNumberLast4` TEXT
+                        `accountNumberLast4` TEXT,
+                        `nickname` TEXT
                     )
                     """.trimIndent()
                 )
@@ -100,7 +101,6 @@ abstract class AppDatabase : RoomDatabase() {
                 )
 
                 // Migrate data from old transactions to transactions_new
-                // Map category name to categoryId, or fallback to 'General' (id 7)
                 db.execSQL(
                     """
                     INSERT INTO `transactions_new` (`id`, `amount`, `merchantName`, `timestamp`, `transactionType`, `accountId`, `categoryId`, `isSplit`, `reimbursementAmount`, `settled`)
@@ -131,6 +131,12 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `accounts` ADD COLUMN `nickname` TEXT")
+            }
+        }
+
         private fun seedCategoriesSql(db: SupportSQLiteDatabase) {
             val defaultCategories = listOf(
                 Pair("Food", "#FF7043"),
@@ -151,9 +157,9 @@ abstract class AppDatabase : RoomDatabase() {
         }
 
         private fun seedAccountsSql(db: SupportSQLiteDatabase) {
-            db.execSQL("INSERT OR IGNORE INTO `accounts` (`id`, `name`, `type`) VALUES (1, 'Primary Bank Account', 'BANK_ACCOUNT')")
-            db.execSQL("INSERT OR IGNORE INTO `accounts` (`id`, `name`, `type`) VALUES (2, 'Cash', 'CASH')")
-            db.execSQL("INSERT OR IGNORE INTO `accounts` (`id`, `name`, `type`) VALUES (3, 'Credit Card', 'CREDIT_CARD')")
+            db.execSQL("INSERT OR IGNORE INTO `accounts` (`id`, `name`, `type`, `nickname`) VALUES (1, 'Primary Bank Account', 'BANK_ACCOUNT', NULL)")
+            db.execSQL("INSERT OR IGNORE INTO `accounts` (`id`, `name`, `type`, `nickname`) VALUES (2, 'Cash', 'CASH', NULL)")
+            db.execSQL("INSERT OR IGNORE INTO `accounts` (`id`, `name`, `type`, `nickname`) VALUES (3, 'Credit Card', 'CREDIT_CARD', NULL)")
         }
 
         fun getDatabase(context: Context): AppDatabase {
@@ -163,7 +169,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "expense_tracker_database"
                 )
-                    .addMigrations(MIGRATION_1_2)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                     .fallbackToDestructiveMigration(true)
                     .addCallback(object : Callback() {
                         override fun onCreate(db: SupportSQLiteDatabase) {
@@ -185,7 +191,6 @@ abstract class AppDatabase : RoomDatabase() {
         }
 
         suspend fun seedInitialData(db: AppDatabase) {
-            // Safe helper for in-memory / DAO seeding if needed
             runCatching {
                 val categoryDao = db.categoryDao()
                 val accountDao = db.accountDao()

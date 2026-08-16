@@ -15,7 +15,6 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -33,6 +32,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountBox
 import androidx.compose.material.icons.filled.Add
@@ -112,6 +112,7 @@ import com.example.expensetracker.data.Category
 import com.example.expensetracker.data.CategoryRule
 import com.example.expensetracker.data.TransactionType
 import com.example.expensetracker.data.TransactionWithDetails
+import com.example.expensetracker.ui.components.SpendSyncLogo
 import kotlinx.coroutines.launch
 import java.text.NumberFormat
 import java.text.SimpleDateFormat
@@ -140,13 +141,16 @@ fun DashboardScreen(
     val totalPendingSettlements by viewModel.totalPendingSettlements.collectAsState()
     val isScanning by viewModel.isScanning.collectAsState()
     val scanMessage by viewModel.scanMessage.collectAsState()
+    val isDarkMode by viewModel.isDarkMode.collectAsState()
 
     var showManualAddDialog by remember { mutableStateOf(false) }
     var showRulesManagerDialog by remember { mutableStateOf(false) }
     var showSettlementsDialog by remember { mutableStateOf(false) }
     var showSupportDialog by remember { mutableStateOf(false) }
     var selectedTransactionForEdit by remember { mutableStateOf<TransactionWithDetails?>(null) }
+    var transactionToDelete by remember { mutableStateOf<TransactionWithDetails?>(null) }
     var selectedCategoryForDrillDown by remember { mutableStateOf<CategoryBreakdownItem?>(null) }
+    var accountToEditNickname by remember { mutableStateOf<Account?>(null) }
 
     val requiredPermissions = remember {
         arrayOf(
@@ -181,15 +185,21 @@ fun DashboardScreen(
         drawerState = drawerState,
         drawerContent = {
             ModalDrawerSheet(
-                modifier = Modifier.width(300.dp)
+                modifier = Modifier.width(310.dp)
             ) {
                 SidebarContent(
                     accounts = allAccounts,
                     selectedAccount = selectedAccount,
                     pendingSettlementsCount = pendingSettlements.size,
                     totalPendingAmount = totalPendingSettlements,
+                    isDarkMode = isDarkMode,
+                    onToggleTheme = { dark -> viewModel.setThemeMode(dark) },
                     onAccountSelected = { account ->
                         viewModel.selectAccount(account)
+                        coroutineScope.launch { drawerState.close() }
+                    },
+                    onEditAccountNickname = { account ->
+                        accountToEditNickname = account
                         coroutineScope.launch { drawerState.close() }
                     },
                     onOpenSettlements = {
@@ -219,19 +229,25 @@ fun DashboardScreen(
             topBar = {
                 TopAppBar(
                     title = {
-                        Column {
-                            Text(
-                                text = "SpendSync",
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 19.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Text(
-                                text = selectedAccount?.name ?: "All Accounts",
-                                fontSize = 12.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            SpendSyncLogo(size = 32.dp)
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column {
+                                Text(
+                                    text = "SpendSync",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 18.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = selectedAccount?.let { it.nickname ?: it.name } ?: "All Accounts",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
                         }
                     },
                     navigationIcon = {
@@ -435,7 +451,7 @@ fun DashboardScreen(
                         MonthlyExpensesCard(
                             summary = spendingSummary,
                             monthLabel = selectedMonth.label,
-                            accountLabel = selectedAccount?.name ?: "All Accounts"
+                            accountLabel = selectedAccount?.let { it.nickname ?: it.name } ?: "All Accounts"
                         )
                     }
 
@@ -522,7 +538,8 @@ fun DashboardScreen(
                         ) { item ->
                             TransactionItemCard(
                                 item = item,
-                                onClick = { selectedTransactionForEdit = item }
+                                onClick = { selectedTransactionForEdit = item },
+                                onDelete = { transactionToDelete = item }
                             )
                         }
                     }
@@ -533,6 +550,46 @@ fun DashboardScreen(
                 }
             }
         }
+    }
+
+    // Delete Confirmation Dialog
+    transactionToDelete?.let { item ->
+        val t = item.transaction
+        AlertDialog(
+            onDismissRequest = { transactionToDelete = null },
+            title = { Text("Delete Transaction", fontWeight = FontWeight.Bold) },
+            text = {
+                Text("Are you sure you want to delete \"${t.merchantName}\" for ₹${String.format(Locale.getDefault(), "%.2f", t.amount)}? This action cannot be undone.")
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.deleteTransaction(t.id)
+                        transactionToDelete = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text("Delete", color = MaterialTheme.colorScheme.onError)
+                }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { transactionToDelete = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    // Edit Account Nickname Dialog
+    accountToEditNickname?.let { account ->
+        EditAccountNicknameDialog(
+            account = account,
+            onDismiss = { accountToEditNickname = null },
+            onSave = { newNickname ->
+                viewModel.updateAccountNickname(account.id, newNickname)
+                accountToEditNickname = null
+            }
+        )
     }
 
     // Category Drill-Down Dialog
@@ -593,6 +650,10 @@ fun DashboardScreen(
                     merchantKeyword = keyword
                 )
                 selectedTransactionForEdit = null
+            },
+            onDelete = {
+                viewModel.deleteTransaction(transactionDetails.transaction.id)
+                selectedTransactionForEdit = null
             }
         )
     }
@@ -624,7 +685,10 @@ fun SidebarContent(
     selectedAccount: Account?,
     pendingSettlementsCount: Int,
     totalPendingAmount: Double,
+    isDarkMode: Boolean?,
+    onToggleTheme: (Boolean?) -> Unit,
     onAccountSelected: (Account?) -> Unit,
+    onEditAccountNickname: (Account) -> Unit,
     onOpenSettlements: () -> Unit,
     onOpenRules: () -> Unit,
     onOpenSupport: () -> Unit,
@@ -643,24 +707,7 @@ fun SidebarContent(
         Row(
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Box(
-                modifier = Modifier
-                    .size(36.dp)
-                    .clip(CircleShape)
-                    .background(
-                        brush = Brush.linearGradient(
-                            colors = listOf(Color(0xFF4A00E0), Color(0xFF8E2DE2))
-                        )
-                    ),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Default.AccountBox,
-                    contentDescription = null,
-                    tint = Color.White,
-                    modifier = Modifier.size(20.dp)
-                )
-            }
+            SpendSyncLogo(size = 38.dp)
             Spacer(modifier = Modifier.width(10.dp))
             Column {
                 Text(
@@ -679,6 +726,15 @@ fun SidebarContent(
 
         Spacer(modifier = Modifier.height(18.dp))
 
+        // Accounts section title
+        Text(
+            text = "ACCOUNTS & CARDS",
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.outline,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+        )
+
         // All Accounts item
         NavigationDrawerItem(
             label = { Text("All Accounts", fontWeight = if (selectedAccount == null) FontWeight.Bold else FontWeight.Normal) },
@@ -695,11 +751,33 @@ fun SidebarContent(
                 AccountType.CASH -> Icons.Default.Person
                 else -> Icons.Default.AccountBox
             }
+            val displayName = account.nickname ?: account.name
             NavigationDrawerItem(
                 label = {
-                    Column {
-                        Text(account.name, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal)
-                        Text(account.type.name.replace("_", " "), fontSize = 10.sp, color = MaterialTheme.colorScheme.outline)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(displayName, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal)
+                            if (account.nickname != null) {
+                                Text(account.name, fontSize = 10.sp, color = MaterialTheme.colorScheme.outline)
+                            } else {
+                                Text(account.type.name.replace("_", " "), fontSize = 10.sp, color = MaterialTheme.colorScheme.outline)
+                            }
+                        }
+                        IconButton(
+                            onClick = { onEditAccountNickname(account) },
+                            modifier = Modifier.size(24.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Edit,
+                                contentDescription = "Edit Nickname",
+                                tint = MaterialTheme.colorScheme.outline,
+                                modifier = Modifier.size(14.dp)
+                            )
+                        }
                     }
                 },
                 selected = isSelected,
@@ -712,6 +790,15 @@ fun SidebarContent(
         Spacer(modifier = Modifier.height(14.dp))
         HorizontalDivider()
         Spacer(modifier = Modifier.height(14.dp))
+
+        // Settlements & Rules section
+        Text(
+            text = "TOOLS & SPLITS",
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.outline,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+        )
 
         // Pending Settlements section
         NavigationDrawerItem(
@@ -761,7 +848,48 @@ fun SidebarContent(
             icon = { Icon(Icons.Default.Info, contentDescription = null) }
         )
 
-        Spacer(modifier = Modifier.weight(1f))
+        Spacer(modifier = Modifier.height(14.dp))
+        HorizontalDivider()
+        Spacer(modifier = Modifier.height(14.dp))
+
+        // Dark Theme Switch
+        Text(
+            text = "APPEARANCE",
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.outline,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+        )
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column {
+                Text(
+                    text = "Dark Mode",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    text = if (isDarkMode == null) "System default" else if (isDarkMode == true) "Always on" else "Always off",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.outline
+                )
+            }
+            Switch(
+                checked = isDarkMode == true,
+                onCheckedChange = { checked ->
+                    onToggleTheme(checked)
+                }
+            )
+        }
+
+        Spacer(modifier = Modifier.height(20.dp))
 
         // Sign Out Button
         TextButton(
@@ -771,6 +899,52 @@ fun SidebarContent(
             Text("Sign Out", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.SemiBold)
         }
     }
+}
+
+@Composable
+fun EditAccountNicknameDialog(
+    account: Account,
+    onDismiss: () -> Unit,
+    onSave: (String?) -> Unit
+) {
+    var nicknameText by remember { mutableStateOf(account.nickname ?: "") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Edit Account Nickname", fontWeight = FontWeight.Bold) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    text = "Account: ${account.name}",
+                    fontSize = 13.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                OutlinedTextField(
+                    value = nicknameText,
+                    onValueChange = { nicknameText = it },
+                    label = { Text("Custom Nickname") },
+                    placeholder = { Text("e.g. Salary Account, Primary UPI") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    onSave(nicknameText.trim().ifEmpty { null })
+                }
+            ) {
+                Text("Save")
+            }
+        },
+        dismissButton = {
+            OutlinedButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
 }
 
 @Composable
@@ -1137,7 +1311,8 @@ fun CategoryDrillDownDialog(
                         items(transactions, key = { it.transaction.id }) { item ->
                             TransactionItemCard(
                                 item = item,
-                                onClick = { onTransactionClick(item) }
+                                onClick = { onTransactionClick(item) },
+                                onDelete = {}
                             )
                         }
                     }
@@ -1277,11 +1452,12 @@ fun SupportHelpDialog(
 @Composable
 fun TransactionItemCard(
     item: TransactionWithDetails,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onDelete: () -> Unit
 ) {
     val transaction = item.transaction
     val categoryName = item.category?.name ?: "General"
-    val accountName = item.account?.name ?: "Account"
+    val accountDisplayName = item.account?.let { it.nickname ?: it.name } ?: "Account"
 
     val indianLocale = remember { Locale.Builder().setLanguage("en").setRegion("IN").build() }
     val formattedDate = remember(transaction.timestamp) {
@@ -1345,7 +1521,7 @@ fun TransactionItemCard(
                     )
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
-                        text = "$categoryName • $accountName",
+                        text = "$categoryName • $accountDisplayName",
                         fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -1383,6 +1559,18 @@ fun TransactionItemCard(
                         color = MaterialTheme.colorScheme.outline
                     )
                 }
+                Spacer(modifier = Modifier.height(4.dp))
+                IconButton(
+                    onClick = onDelete,
+                    modifier = Modifier.size(22.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Delete,
+                        contentDescription = "Delete Transaction",
+                        tint = MaterialTheme.colorScheme.outline.copy(alpha = 0.7f),
+                        modifier = Modifier.size(15.dp)
+                    )
+                }
             }
         }
     }
@@ -1394,7 +1582,8 @@ fun EditTransactionCategoryDialog(
     transactionDetails: TransactionWithDetails,
     categories: List<Category>,
     onDismiss: () -> Unit,
-    onSave: (newCategoryId: Long, saveRule: Boolean, keyword: String) -> Unit
+    onSave: (newCategoryId: Long, saveRule: Boolean, keyword: String) -> Unit,
+    onDelete: () -> Unit = {}
 ) {
     var selectedCatId by remember { mutableStateOf(transactionDetails.transaction.categoryId) }
     var saveRuleCheckbox by remember { mutableStateOf(true) }
@@ -1405,11 +1594,11 @@ fun EditTransactionCategoryDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Edit Category", fontWeight = FontWeight.Bold) },
+        title = { Text("Edit Transaction", fontWeight = FontWeight.Bold) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(
-                    text = "Transaction: ${transactionDetails.transaction.merchantName}",
+                    text = "Merchant: ${transactionDetails.transaction.merchantName}",
                     fontSize = 13.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -1472,6 +1661,19 @@ fun EditTransactionCategoryDialog(
                         shape = RoundedCornerShape(10.dp)
                     )
                 }
+
+                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+
+                OutlinedButton(
+                    onClick = onDelete,
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Delete This Transaction", fontSize = 12.sp)
+                }
             }
         },
         confirmButton = {
@@ -1480,7 +1682,7 @@ fun EditTransactionCategoryDialog(
                     onSave(selectedCatId, saveRuleCheckbox, keywordText)
                 }
             ) {
-                Text("Save")
+                Text("Save Changes")
             }
         },
         dismissButton = {
@@ -1824,7 +2026,7 @@ fun ManualEntryDialog(
                     onExpandedChange = { accountDropdownExpanded = !accountDropdownExpanded }
                 ) {
                     OutlinedTextField(
-                        value = currentAcc?.name ?: "Account",
+                        value = currentAcc?.let { it.nickname ?: it.name } ?: "Account",
                         onValueChange = {},
                         readOnly = true,
                         label = { Text("Account") },
@@ -1841,7 +2043,7 @@ fun ManualEntryDialog(
                     ) {
                         accounts.forEach { account ->
                             DropdownMenuItem(
-                                text = { Text(account.name) },
+                                text = { Text(account.nickname ?: account.name) },
                                 onClick = {
                                     selectedAccId = account.id
                                     accountDropdownExpanded = false

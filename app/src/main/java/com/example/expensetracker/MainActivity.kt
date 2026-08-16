@@ -8,6 +8,7 @@ import androidx.activity.viewModels
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -28,47 +29,51 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        // Safely initialize Firebase without crashing if google-services.json is missing
-        val isFirebaseReady = try {
+        // Safely initialize Firebase if available
+        try {
             if (FirebaseApp.getApps(this).isEmpty()) {
                 FirebaseApp.initializeApp(this)
             }
-            true
+        } catch (e: Exception) {
+            // Ignore Firebase initialization error in offline development mode
+        }
+
+        val hasFirebaseUser = try {
+            FirebaseAuth.getInstance().currentUser != null
         } catch (e: Exception) {
             false
         }
 
-        val currentUser = try {
-            if (isFirebaseReady) FirebaseAuth.getInstance().currentUser else null
-        } catch (e: Exception) {
-            null
-        }
+        // Persistent Auth check: Firebase user OR persisted session
+        val isInitiallyAuthenticated = hasFirebaseUser || viewModel.isPersistedLoggedIn()
 
         setContent {
-            ExpenseTrackerTheme {
+            val isDarkMode by viewModel.isDarkMode.collectAsState()
+
+            ExpenseTrackerTheme(userDarkModePreference = isDarkMode) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
                     var isAuthenticated by remember {
-                        mutableStateOf(currentUser != null || !isFirebaseReady)
+                        mutableStateOf(isInitiallyAuthenticated)
                     }
 
                     if (isAuthenticated) {
                         DashboardScreen(
                             viewModel = viewModel,
                             onSignOut = {
-                                try {
-                                    FirebaseAuth.getInstance().signOut()
-                                } catch (e: Exception) {
-                                    // Ignore sign-out errors when running in offline mode
+                                viewModel.signOut {
+                                    isAuthenticated = false
                                 }
-                                isAuthenticated = false
                             }
                         )
                     } else {
                         AuthScreen(
-                            onAuthSuccess = { isAuthenticated = true }
+                            onAuthSuccess = {
+                                viewModel.setPersistedLoggedIn(true)
+                                isAuthenticated = true
+                            }
                         )
                     }
                 }
