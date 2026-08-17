@@ -143,7 +143,7 @@ fun AiInsightsDialog(
                                 fontSize = 17.sp
                             )
                             Text(
-                                text = "Powered by Gemini 1.5 Flash",
+                                text = "Powered by Gemini AI",
                                 fontSize = 11.sp,
                                 color = MaterialTheme.colorScheme.primary
                             )

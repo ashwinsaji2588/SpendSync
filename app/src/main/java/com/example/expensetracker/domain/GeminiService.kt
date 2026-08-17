@@ -120,7 +120,7 @@ class GeminiService(private val context: Context) {
             SMS: "$smsText"
         """.trimIndent()
 
-        val modelsToTry = listOf("gemini-1.5-flash", "gemini-2.0-flash", "gemini-1.5-pro", "gemini-2.5-flash")
+        val modelsToTry = listOf("gemini-flash-latest", "gemini-3.6-flash", "gemini-3.7-flash", "gemini-3.5-flash", "gemini-pro-latest")
         for (modelName in modelsToTry) {
             try {
                 val rawText = callGeminiRestApi(prompt, apiKey, modelName) ?: continue
@@ -179,7 +179,7 @@ class GeminiService(private val context: Context) {
             Provide a helpful, actionable, concise, and friendly answer. Keep bullet points crisp.
         """.trimIndent()
 
-        val modelsToTry = listOf("gemini-1.5-flash", "gemini-2.0-flash", "gemini-1.5-pro", "gemini-2.5-flash")
+        val modelsToTry = listOf("gemini-flash-latest", "gemini-3.6-flash", "gemini-3.7-flash", "gemini-3.5-flash", "gemini-pro-latest")
         var lastError: String? = null
         for (modelName in modelsToTry) {
             try {
