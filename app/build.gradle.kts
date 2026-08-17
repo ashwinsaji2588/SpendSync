@@ -82,8 +82,8 @@ dependencies {
     // Biometric Authentication
     implementation(libs.androidx.biometric)
 
-    // Google Gemini AI SDK
-    implementation("com.google.ai.client.generativeai:generativeai:0.9.0")
+    // OkHttp for Direct REST API Client
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
 
     testImplementation(libs.junit)
     androidTestImplementation(platform(libs.androidx.compose.bom))

@@ -2,11 +2,16 @@ package com.example.expensetracker.domain
 
 import android.content.Context
 import com.example.expensetracker.data.TransactionType
-import com.google.ai.client.generativeai.GenerativeModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONArray
 import org.json.JSONObject
 import java.util.Locale
+import java.util.concurrent.TimeUnit
 
 data class AiParsedTransaction(
     val merchantName: String,
@@ -19,6 +24,12 @@ class GeminiService(private val context: Context) {
 
     private val prefs = context.getSharedPreferences("expense_tracker_prefs", Context.MODE_PRIVATE)
 
+    private val httpClient = OkHttpClient.Builder()
+        .connectTimeout(20, TimeUnit.SECONDS)
+        .readTimeout(30, TimeUnit.SECONDS)
+        .writeTimeout(20, TimeUnit.SECONDS)
+        .build()
+
     fun getApiKey(): String {
         val saved = prefs.getString(PREF_GEMINI_API_KEY, "") ?: ""
         if (saved.isNotBlank()) return saved
@@ -29,18 +40,68 @@ class GeminiService(private val context: Context) {
         prefs.edit().putString(PREF_GEMINI_API_KEY, apiKey.trim()).apply()
     }
 
-    private fun getModel(modelName: String = "gemini-2.5-flash"): GenerativeModel? {
-        val apiKey = getApiKey()
-        if (apiKey.isBlank()) return null
-        val cleanModelName = modelName.removePrefix("models/")
-        return GenerativeModel(
-            modelName = cleanModelName,
-            apiKey = apiKey
-        )
+    /**
+     * Direct HTTP REST call to Google Gemini endpoint.
+     * POST https://generativelanguage.googleapis.com/v1beta/models/{modelName}:generateContent?key={apiKey}
+     */
+    private fun callGeminiRestApi(prompt: String, apiKey: String, modelName: String): String? {
+        val cleanModel = modelName.removePrefix("models/")
+        val url = "https://generativelanguage.googleapis.com/v1beta/models/$cleanModel:generateContent?key=$apiKey"
+
+        // Build standard JSON payload: contents -> parts -> text
+        val requestJson = JSONObject().apply {
+            val contentsArray = JSONArray()
+            val contentObj = JSONObject().apply {
+                val partsArray = JSONArray()
+                partsArray.put(JSONObject().apply {
+                    put("text", prompt)
+                })
+                put("parts", partsArray)
+            }
+            contentsArray.put(contentObj)
+            put("contents", contentsArray)
+        }
+
+        val requestBody = requestJson.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
+        val request = Request.Builder()
+            .url(url)
+            .post(requestBody)
+            .build()
+
+        httpClient.newCall(request).execute().use { response ->
+            val responseBody = response.body?.string() ?: return null
+            if (!response.isSuccessful) {
+                val errorMsg = try {
+                    val errJson = JSONObject(responseBody).optJSONObject("error")
+                    errJson?.optString("message") ?: "HTTP ${response.code}"
+                } catch (e: Exception) {
+                    "HTTP ${response.code}"
+                }
+                throw RuntimeException(errorMsg)
+            }
+
+            return parseGeneratedText(responseBody)
+        }
     }
 
     /**
-     * AI-Powered Fallback SMS Parser when regex/keyword categorization needs deeper understanding.
+     * Extracts text from candidates[0].content.parts[0].text
+     */
+    private fun parseGeneratedText(responseBody: String): String? {
+        val root = JSONObject(responseBody)
+        val candidates = root.optJSONArray("candidates") ?: return null
+        if (candidates.length() == 0) return null
+        val firstCandidate = candidates.getJSONObject(0)
+        val content = firstCandidate.optJSONObject("content") ?: return null
+        val parts = content.optJSONArray("parts") ?: return null
+        if (parts.length() == 0) return null
+        val firstPart = parts.getJSONObject(0)
+        val text = firstPart.optString("text", "")
+        return text.ifBlank { null }
+    }
+
+    /**
+     * AI-Powered Fallback SMS Parser using direct REST API.
      */
     suspend fun parseSmsWithAi(smsText: String): AiParsedTransaction? = withContext(Dispatchers.IO) {
         val apiKey = getApiKey()
@@ -59,13 +120,10 @@ class GeminiService(private val context: Context) {
             SMS: "$smsText"
         """.trimIndent()
 
-        val modelsToTry = listOf("gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-pro", "gemini-2.0-flash-lite", "gemini-1.5-flash")
+        val modelsToTry = listOf("gemini-1.5-flash", "gemini-2.0-flash", "gemini-1.5-pro", "gemini-2.5-flash")
         for (modelName in modelsToTry) {
             try {
-                val cleanModelName = modelName.removePrefix("models/")
-                val model = GenerativeModel(modelName = cleanModelName, apiKey = apiKey)
-                val response = model.generateContent(prompt)
-                val rawText = response.text?.trim() ?: continue
+                val rawText = callGeminiRestApi(prompt, apiKey, modelName) ?: continue
                 val cleanJson = rawText
                     .removePrefix("```json")
                     .removePrefix("```")
@@ -100,7 +158,7 @@ class GeminiService(private val context: Context) {
     }
 
     /**
-     * Financial Chat Assistant answering user questions using aggregated spending data.
+     * Financial Chat Assistant answering user questions using direct REST API.
      */
     suspend fun answerFinancialQuery(financialContext: String, userQuery: String): String = withContext(Dispatchers.IO) {
         val apiKey = getApiKey()
@@ -121,14 +179,11 @@ class GeminiService(private val context: Context) {
             Provide a helpful, actionable, concise, and friendly answer. Keep bullet points crisp.
         """.trimIndent()
 
-        val modelsToTry = listOf("gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-pro", "gemini-2.0-flash-lite", "gemini-1.5-flash")
+        val modelsToTry = listOf("gemini-1.5-flash", "gemini-2.0-flash", "gemini-1.5-pro", "gemini-2.5-flash")
         var lastError: String? = null
         for (modelName in modelsToTry) {
             try {
-                val cleanModelName = modelName.removePrefix("models/")
-                val model = GenerativeModel(modelName = cleanModelName, apiKey = apiKey)
-                val response = model.generateContent(prompt)
-                val text = response.text?.trim()
+                val text = callGeminiRestApi(prompt, apiKey, modelName)
                 if (!text.isNullOrBlank()) {
                     return@withContext text
                 }
