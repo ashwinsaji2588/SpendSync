@@ -67,9 +67,6 @@ fun FullEditTransactionDialog(
         type: TransactionType,
         categoryId: Long,
         accountId: Long,
-        isSplit: Boolean,
-        reimbursementAmount: Double,
-        peerName: String?,
         notes: String?,
         saveRule: Boolean,
         keyword: String,
@@ -86,10 +83,6 @@ fun FullEditTransactionDialog(
     var selectedAccId by remember { mutableStateOf(t.accountId) }
     var isCreatingCustomCategory by remember { mutableStateOf(false) }
     var customCategoryText by remember { mutableStateOf("") }
-
-    var isSplitEnabled by remember { mutableStateOf(t.isSplit) }
-    var reimbursementText by remember { mutableStateOf(if (t.reimbursementAmount > 0) String.format(Locale.US, "%.2f", t.reimbursementAmount) else "") }
-    var peerNameText by remember { mutableStateOf(t.peerName ?: "") }
     var notesText by remember { mutableStateOf(t.notes ?: "") }
 
     var saveRuleCheckbox by remember { mutableStateOf(false) }
@@ -109,7 +102,7 @@ fun FullEditTransactionDialog(
             tonalElevation = 6.dp,
             modifier = Modifier
                 .fillMaxWidth()
-                .height(600.dp)
+                .height(560.dp)
         ) {
             Column(
                 modifier = Modifier
@@ -286,44 +279,6 @@ fun FullEditTransactionDialog(
                         }
                     }
 
-                    // Split Details Toggle
-                    if (selectedType == TransactionType.EXPENSE) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text("Split Expense (Reimbursement)", fontSize = 13.sp, fontWeight = FontWeight.Medium)
-                            Switch(
-                                checked = isSplitEnabled,
-                                onCheckedChange = { isSplitEnabled = it }
-                            )
-                        }
-
-                        if (isSplitEnabled) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                OutlinedTextField(
-                                    value = peerNameText,
-                                    onValueChange = { peerNameText = it },
-                                    label = { Text("Friend Name") },
-                                    modifier = Modifier.weight(1f),
-                                    shape = RoundedCornerShape(10.dp)
-                                )
-                                OutlinedTextField(
-                                    value = reimbursementText,
-                                    onValueChange = { reimbursementText = it },
-                                    label = { Text("Owed (₹)") },
-                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                                    modifier = Modifier.weight(1f),
-                                    shape = RoundedCornerShape(10.dp)
-                                )
-                            }
-                        }
-                    }
-
                     // Notes
                     OutlinedTextField(
                         value = notesText,
@@ -396,8 +351,6 @@ fun FullEditTransactionDialog(
                                 return@Button
                             }
                             val merch = merchantText.trim().ifEmpty { "Transaction" }
-                            val reimb = if (isSplitEnabled) reimbursementText.toDoubleOrNull() ?: 0.0 else 0.0
-                            val peer = if (isSplitEnabled) peerNameText.trim().ifEmpty { "Friend" } else null
 
                             val customCat = if (isCreatingCustomCategory && customCategoryText.isNotBlank()) {
                                 customCategoryText.trim()
@@ -410,9 +363,6 @@ fun FullEditTransactionDialog(
                                 selectedType,
                                 selectedCatId,
                                 selectedAccId,
-                                isSplitEnabled,
-                                reimb,
-                                peer,
                                 notesText.trim().ifEmpty { null },
                                 saveRuleCheckbox,
                                 keywordText,

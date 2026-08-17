@@ -43,27 +43,8 @@ interface TransactionDao {
         endTimestamp: Long
     ): Flow<List<TransactionWithDetails>>
 
-    @Transaction
-    @Query("SELECT * FROM transactions WHERE isSplit = 1 AND settled = 0 ORDER BY timestamp DESC")
-    fun getPendingSettlements(): Flow<List<TransactionWithDetails>>
-
     @Query("UPDATE transactions SET categoryId = :categoryId WHERE id = :transactionId")
     suspend fun updateTransactionCategory(transactionId: Long, categoryId: Long)
-
-    @Query("UPDATE transactions SET settled = :settled WHERE id = :transactionId")
-    suspend fun updateSettlementStatus(transactionId: Long, settled: Boolean)
-
-    @Query("""
-        UPDATE transactions 
-        SET isSplit = :isSplit, reimbursementAmount = :reimbursementAmount, peerName = :peerName 
-        WHERE id = :transactionId
-    """)
-    suspend fun updateSplitDetails(
-        transactionId: Long,
-        isSplit: Boolean,
-        reimbursementAmount: Double,
-        peerName: String?
-    )
 
     @Query("DELETE FROM transactions WHERE id = :transactionId")
     suspend fun deleteTransaction(transactionId: Long)

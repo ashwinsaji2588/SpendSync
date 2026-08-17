@@ -21,7 +21,7 @@ class CsvExporter(private val context: Context) {
             val writer = OutputStreamWriter(outputStream)
 
             // Header line
-            writer.append("ID,Date,Time,Type,Merchant,Category,Account,Amount,IsSplit,ReimbursementAmount,NetExpense,Notes\n")
+            writer.append("ID,Date,Time,Type,Merchant,Category,Account,Amount,Notes\n")
 
             val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.US)
             val timeFormat = SimpleDateFormat("HH:mm:ss", Locale.US)
@@ -35,12 +35,9 @@ class CsvExporter(private val context: Context) {
                 val category = escapeCsv(item.category?.name ?: "General")
                 val account = escapeCsv(item.account?.nickname ?: item.account?.name ?: "Account")
                 val amount = String.format(Locale.US, "%.2f", t.amount)
-                val isSplit = if (t.isSplit) "YES" else "NO"
-                val reimbursement = String.format(Locale.US, "%.2f", t.reimbursementAmount)
-                val net = String.format(Locale.US, "%.2f", (t.amount - t.reimbursementAmount).coerceAtLeast(0.0))
                 val notes = escapeCsv(t.notes ?: "")
 
-                writer.append("${t.id},$date,$time,$type,$merchant,$category,$account,$amount,$isSplit,$reimbursement,$net,$notes\n")
+                writer.append("${t.id},$date,$time,$type,$merchant,$category,$account,$amount,$notes\n")
             }
 
             writer.flush()

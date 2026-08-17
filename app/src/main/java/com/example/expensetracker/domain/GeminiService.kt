@@ -29,7 +29,7 @@ class GeminiService(private val context: Context) {
         prefs.edit().putString(PREF_GEMINI_API_KEY, apiKey.trim()).apply()
     }
 
-    private fun getModel(modelName: String = "gemini-2.0-flash"): GenerativeModel? {
+    private fun getModel(modelName: String = "gemini-2.5-flash"): GenerativeModel? {
         val apiKey = getApiKey()
         if (apiKey.isBlank()) return null
         val cleanModelName = modelName.removePrefix("models/")
@@ -53,13 +53,13 @@ class GeminiService(private val context: Context) {
               "merchantName": "Clean Merchant or Recipient Name (e.g. Swiggy, Groww, KSFE, Uber, Landlord)",
               "amount": 1000.0,
               "transactionType": "EXPENSE or INCOME or TRANSFER",
-              "category": "Food, Grocery, Shopping, Bills & Utilities, Travel, Entertainment, Health, Investment, Salary, Freelance, or a custom suitable Category"
+              "category": "Food, Grocery, Shopping, Bills & Utilities, Travel, Entertainment, Health, Investment, Salary, Freelance, Reimbursements, or a custom suitable Category"
             }
 
             SMS: "$smsText"
         """.trimIndent()
 
-        val modelsToTry = listOf("gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash-lite")
+        val modelsToTry = listOf("gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-pro", "gemini-2.0-flash-lite", "gemini-1.5-flash")
         for (modelName in modelsToTry) {
             try {
                 val cleanModelName = modelName.removePrefix("models/")
@@ -102,17 +102,17 @@ class GeminiService(private val context: Context) {
     /**
      * Financial Chat Assistant answering user questions using aggregated spending data.
      */
-    suspend fun answerFinancialQuery(userQuery: String, financialContext: String): String = withContext(Dispatchers.IO) {
+    suspend fun answerFinancialQuery(financialContext: String, userQuery: String): String = withContext(Dispatchers.IO) {
         val apiKey = getApiKey()
         if (apiKey.isBlank()) {
-            return@withContext "Google Gemini API Key is not configured. Please ensure GEMINI_API_KEY is provided."
+            return@withContext "Google Gemini API Key is not configured. Please ensure GEMINI_API_KEY is provided in local.properties or app settings."
         }
 
         val prompt = """
             You are SpendSync's AI Financial Advisor for an Indian user.
             All monetary amounts are in Indian Rupees (₹).
             
-            Current User Financial Context:
+            Current User Financial Context from Room Database:
             $financialContext
             
             User Question:
@@ -121,7 +121,7 @@ class GeminiService(private val context: Context) {
             Provide a helpful, actionable, concise, and friendly answer. Keep bullet points crisp.
         """.trimIndent()
 
-        val modelsToTry = listOf("gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash-lite")
+        val modelsToTry = listOf("gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-pro", "gemini-2.0-flash-lite", "gemini-1.5-flash")
         var lastError: String? = null
         for (modelName in modelsToTry) {
             try {

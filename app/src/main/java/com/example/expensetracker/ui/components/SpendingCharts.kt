@@ -158,14 +158,19 @@ fun DailyBurnRateChart(
 
     val dailyData = remember(transactions) {
         val cal = Calendar.getInstance()
-        val expenseTxns = transactions.filter { it.transaction.transactionType == TransactionType.EXPENSE }
-        val daySums = mutableMapOf<Int, Double>()
+        val dayExpenses = mutableMapOf<Int, Double>()
+        val dayReimbursements = mutableMapOf<Int, Double>()
 
-        for (item in expenseTxns) {
+        for (item in transactions) {
             cal.timeInMillis = item.transaction.timestamp
             val day = cal.get(Calendar.DAY_OF_MONTH)
-            val net = (item.transaction.amount - item.transaction.reimbursementAmount).coerceAtLeast(0.0)
-            daySums[day] = (daySums[day] ?: 0.0) + net
+            if (item.transaction.transactionType == TransactionType.EXPENSE) {
+                dayExpenses[day] = (dayExpenses[day] ?: 0.0) + item.transaction.amount
+            } else if (item.transaction.transactionType == TransactionType.INCOME &&
+                item.category?.name.equals("Reimbursements", ignoreCase = true)
+            ) {
+                dayReimbursements[day] = (dayReimbursements[day] ?: 0.0) + item.transaction.amount
+            }
         }
 
         val maxDays = if (transactions.isNotEmpty()) {
@@ -175,7 +180,8 @@ fun DailyBurnRateChart(
 
         val list = mutableListOf<Pair<Int, Double>>()
         for (d in 1..maxDays) {
-            list.add(d to (daySums[d] ?: 0.0))
+            val net = ((dayExpenses[d] ?: 0.0) - (dayReimbursements[d] ?: 0.0)).coerceAtLeast(0.0)
+            list.add(d to net)
         }
         list
     }
@@ -510,14 +516,19 @@ private fun calculateNiceMax(rawMax: Double): Double {
 
 private fun computeCumulativeDays(transactions: List<TransactionWithDetails>): List<Pair<Int, Double>> {
     val cal = Calendar.getInstance()
-    val expenseTxns = transactions.filter { it.transaction.transactionType == TransactionType.EXPENSE }
-    val daySums = mutableMapOf<Int, Double>()
+    val dayExpenses = mutableMapOf<Int, Double>()
+    val dayReimbursements = mutableMapOf<Int, Double>()
 
-    for (item in expenseTxns) {
+    for (item in transactions) {
         cal.timeInMillis = item.transaction.timestamp
         val day = cal.get(Calendar.DAY_OF_MONTH)
-        val net = (item.transaction.amount - item.transaction.reimbursementAmount).coerceAtLeast(0.0)
-        daySums[day] = (daySums[day] ?: 0.0) + net
+        if (item.transaction.transactionType == TransactionType.EXPENSE) {
+            dayExpenses[day] = (dayExpenses[day] ?: 0.0) + item.transaction.amount
+        } else if (item.transaction.transactionType == TransactionType.INCOME &&
+            item.category?.name.equals("Reimbursements", ignoreCase = true)
+        ) {
+            dayReimbursements[day] = (dayReimbursements[day] ?: 0.0) + item.transaction.amount
+        }
     }
 
     var runningTotal = 0.0
@@ -528,7 +539,8 @@ private fun computeCumulativeDays(transactions: List<TransactionWithDetails>): L
     } else 30
 
     for (d in 1..maxDay) {
-        runningTotal += (daySums[d] ?: 0.0)
+        val netDay = ((dayExpenses[d] ?: 0.0) - (dayReimbursements[d] ?: 0.0)).coerceAtLeast(0.0)
+        runningTotal += netDay
         result.add(d to runningTotal)
     }
     return result

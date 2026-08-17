@@ -43,29 +43,21 @@ class GPayNotificationListener : NotificationListenerService() {
 
         val combinedContent = "$title $text $bigText"
         val lowerContent = combinedContent.lowercase(Locale.ROOT)
+        // Check if this is an incoming UPI payment / credit / reimbursement
+        val isIncomeReceived = lowerContent.contains("received") ||
+                lowerContent.contains("paid you") ||
+                lowerContent.contains("sent you") ||
+                lowerContent.contains("credited")
 
-        // Check if this is an Outflow Liability (Owed By Me - e.g. someone requested money from user)
-        val isPayableRequest = lowerContent.contains("requested from you") ||
-                lowerContent.contains("request from") ||
-                lowerContent.contains("you owe") ||
-                lowerContent.contains("collect request") ||
-                lowerContent.contains("demanded") ||
-                lowerContent.contains("requested money")
-
-        // Check if this is a Split / Receivable (Owed To Me)
-        val isSplitReceivable = lowerContent.contains("split") ||
-                lowerContent.contains("share") ||
-                lowerContent.contains("split request sent")
-
-        if (isPayableRequest || isSplitReceivable) {
+        if (isIncomeReceived) {
             val amountMatch = amountRegex.find(combinedContent)
             val amountStr = amountMatch?.groupValues?.get(1)?.replace(",", "")
             val amount = amountStr?.toDoubleOrNull()
 
             if (amount != null && amount > 0.0) {
-                // Extract peer/creditor name
+                // Extract peer/sender name
                 val peerMatch = splitPeerRegex.find(combinedContent)
-                val peerName = peerMatch?.groupValues?.get(1)?.trim()?.takeIf { it.isNotBlank() } ?: "Contact"
+                val peerName = peerMatch?.groupValues?.get(1)?.trim()?.takeIf { it.isNotBlank() } ?: "UPI Contact"
                 val timestamp = sbn.postTime.takeIf { it > 0 } ?: System.currentTimeMillis()
 
                 CoroutineScope(Dispatchers.IO).launch {
@@ -73,48 +65,30 @@ class GPayNotificationListener : NotificationListenerService() {
                         val db = AppDatabase.getDatabase(applicationContext)
                         AppDatabase.seedInitialData(db)
 
-                        if (isPayableRequest) {
-                            // Auto-log into Payables ledger (Owed By Me)
-                            val payableDao = db.payableDao()
-                            val payable = com.example.expensetracker.data.PayableEntity(
-                                creditorName = peerName,
-                                amount = amount,
-                                description = title.ifBlank { text },
-                                timestamp = timestamp,
-                                isSettled = false
-                            )
-                            payableDao.insertPayable(payable)
-                            Log.d(TAG, "Logged payable liability from $packageName: Owe ₹$amount to $peerName")
-                        } else {
-                            val categoryDao = db.categoryDao()
-                            val accountDao = db.accountDao()
-                            val transactionDao = db.transactionDao()
+                        val categoryDao = db.categoryDao()
+                        val accountDao = db.accountDao()
+                        val transactionDao = db.transactionDao()
 
-                            val categoryId = categoryDao.getCategoryByName("General")?.id
-                                ?: categoryDao.insertCategory(Category(name = "General"))
+                        val categoryId = categoryDao.getCategoryByName("Reimbursements")?.id
+                            ?: categoryDao.insertCategory(Category(name = "Reimbursements", iconName = "reimbursements", colorHex = "#00897B"))
 
-                            val accountId = accountDao.getAllAccountsDirect().firstOrNull()?.id
-                                ?: accountDao.insertAccount(Account(name = "UPI Bank Account", type = AccountType.BANK_ACCOUNT))
+                        val accountId = accountDao.getAllAccountsDirect().firstOrNull()?.id
+                            ?: accountDao.insertAccount(Account(name = "UPI Bank Account", type = AccountType.BANK_ACCOUNT))
 
-                            val splitTransaction = TransactionEntity(
-                                amount = amount,
-                                merchantName = "Split: $peerName",
-                                timestamp = timestamp,
-                                transactionType = TransactionType.EXPENSE,
-                                accountId = accountId,
-                                categoryId = categoryId,
-                                isSplit = true,
-                                reimbursementAmount = amount,
-                                settled = false,
-                                peerName = peerName,
-                                notes = "Auto-detected split from $title"
-                            )
+                        val reimbursementTxn = TransactionEntity(
+                            amount = amount,
+                            merchantName = "From: $peerName",
+                            timestamp = timestamp,
+                            transactionType = TransactionType.INCOME,
+                            accountId = accountId,
+                            categoryId = categoryId,
+                            notes = "Auto-detected UPI reimbursement from $title"
+                        )
 
-                            transactionDao.insertTransaction(splitTransaction)
-                            Log.d(TAG, "Logged pending split from $packageName: $peerName owes ₹$amount")
-                        }
+                        transactionDao.insertTransaction(reimbursementTxn)
+                        Log.d(TAG, "Logged reimbursement from $packageName: Received ₹$amount from $peerName")
                     } catch (e: Exception) {
-                        Log.e(TAG, "Error processing UPI split/payable notification", e)
+                        Log.e(TAG, "Error processing UPI reimbursement notification", e)
                     }
                 }
             }

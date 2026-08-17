@@ -101,9 +101,7 @@ class HistoricalSmsScanner(
                                             transactionType = aiResult.transactionType,
                                             accountId = accId,
                                             categoryId = if (catId > 0) catId else (categoryDao.getCategoryByName("General")?.id ?: 1L),
-                                            isSplit = false,
-                                            reimbursementAmount = 0.0,
-                                            settled = false
+                                            notes = null
                                         )
                                     }
                                 } catch (aiEx: Exception) {

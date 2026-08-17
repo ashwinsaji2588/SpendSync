@@ -15,7 +15,6 @@ import com.example.expensetracker.data.Budget
 import com.example.expensetracker.data.BudgetWithCategory
 import com.example.expensetracker.data.Category
 import com.example.expensetracker.data.CategoryRule
-import com.example.expensetracker.data.PayableEntity
 import com.example.expensetracker.data.TransactionEntity
 import com.example.expensetracker.data.TransactionType
 import com.example.expensetracker.data.TransactionWithDetails
@@ -74,7 +73,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val categoryDao = db.categoryDao()
     private val categoryRuleDao = db.categoryRuleDao()
     private val budgetDao = db.budgetDao()
-    private val payableDao = db.payableDao()
 
     private val smsScanner = HistoricalSmsScanner(application, db)
     private val csvParser = CsvStatementParser(application, db)
@@ -160,19 +158,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _selectedAccount,
         _customDateRange,
         _searchQuery
-    ) { month, account, dateRange, query ->
-        DateFilterParams(month, account, dateRange, query)
+    ) { month, account, customRange, query ->
+        DateFilterParams(month, account, customRange, query)
     }
         .flatMapLatest { params ->
-            val startTs = params.customDateRange?.first ?: params.month.startTimestamp
-            val endTs = params.customDateRange?.second ?: params.month.endTimestamp
-
-            val flow = if (params.account == null) {
-                transactionDao.getTransactionsWithDetailsForDateRange(startTs, endTs)
+            val start = params.customDateRange?.first ?: params.month.startTimestamp
+            val end = params.customDateRange?.second ?: params.month.endTimestamp
+            val flow = if (params.account != null) {
+                transactionDao.getTransactionsWithDetailsForAccountAndDateRange(params.account.id, start, end)
             } else {
-                transactionDao.getTransactionsWithDetailsForAccountAndDateRange(params.account.id, startTs, endTs)
+                transactionDao.getTransactionsWithDetailsForDateRange(start, end)
             }
-
             flow.map { list ->
                 if (params.query.isBlank()) {
                     list
@@ -214,12 +210,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             initialValue = emptyList()
         )
 
+    // Net Spent = Total Regular Expenses - Total Reimbursements
     val monthlySpendingSummary: StateFlow<MonthlySpendingSummary> = allTransactions
         .map { list ->
-            val expenseItems = list.filter { it.transaction.transactionType == TransactionType.EXPENSE }
-            val gross = expenseItems.sumOf { it.transaction.amount }
-            val reimbursements = expenseItems.sumOf { it.transaction.reimbursementAmount }
+            val gross = list
+                .filter { it.transaction.transactionType == TransactionType.EXPENSE }
+                .sumOf { it.transaction.amount }
+
+            val reimbursements = list
+                .filter {
+                    it.transaction.transactionType == TransactionType.INCOME &&
+                    it.category?.name.equals("Reimbursements", ignoreCase = true)
+                }
+                .sumOf { it.transaction.amount }
+
             val net = (gross - reimbursements).coerceAtLeast(0.0)
+
             MonthlySpendingSummary(
                 grossExpense = gross,
                 totalReimbursements = reimbursements,
@@ -235,10 +241,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val categoryBreakdown: StateFlow<List<CategoryBreakdownItem>> = allTransactions
         .map { list ->
             val expenseItems = list.filter { it.transaction.transactionType == TransactionType.EXPENSE }
-            val totalNetExpense = expenseItems.sumOf { it.transaction.amount - it.transaction.reimbursementAmount }
-                .coerceAtLeast(0.0)
+            val totalExpense = expenseItems.sumOf { it.transaction.amount }.coerceAtLeast(0.0)
 
-            if (totalNetExpense <= 0.0) {
+            if (totalExpense <= 0.0) {
                 emptyList()
             } else {
                 expenseItems
@@ -247,14 +252,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         val firstCat = items.first().category
                         val catName = firstCat?.name ?: "General"
                         val catColor = firstCat?.colorHex
-                        val catNetSum = items.sumOf { it.transaction.amount - it.transaction.reimbursementAmount }
-                            .coerceAtLeast(0.0)
-                        val pct = ((catNetSum / totalNetExpense) * 100).toFloat()
+                        val catSum = items.sumOf { it.transaction.amount }
+                        val pct = ((catSum / totalExpense) * 100).toFloat()
                         CategoryBreakdownItem(
                             categoryId = catId,
                             categoryName = catName,
                             colorHex = catColor,
-                            totalAmount = catNetSum,
+                            totalAmount = catSum,
                             percentage = pct
                         )
                     }
@@ -275,40 +279,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5000),
             initialValue = emptyList()
-        )
-
-    val pendingSettlements: StateFlow<List<TransactionWithDetails>> = transactionDao
-        .getPendingSettlements()
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
-            initialValue = emptyList()
-        )
-
-    val totalPendingSettlements: StateFlow<Double> = pendingSettlements
-        .map { list -> list.sumOf { it.transaction.reimbursementAmount } }
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
-            initialValue = 0.0
-        )
-
-    // Payables Ledger (Owed By Me to friends / creditors)
-    val activePayables: StateFlow<List<PayableEntity>> = payableDao
-        .getActivePayables()
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
-            initialValue = emptyList()
-        )
-
-    val totalOwedByMe: StateFlow<Double> = payableDao
-        .getTotalOwedAmount()
-        .map { it ?: 0.0 }
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
-            initialValue = 0.0
         )
 
     init {
@@ -357,32 +327,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val next = !_isBalanceVisible.value
         _isBalanceVisible.value = next
         prefs.edit().putBoolean(PREF_BALANCE_VISIBLE, next).apply()
-    }
-
-    fun addPayable(creditorName: String, amount: Double, description: String = "") {
-        viewModelScope.launch {
-            payableDao.insertPayable(
-                PayableEntity(
-                    creditorName = creditorName.trim(),
-                    amount = amount,
-                    description = description.trim(),
-                    timestamp = System.currentTimeMillis(),
-                    isSettled = false
-                )
-            )
-        }
-    }
-
-    fun markPayableSettled(payableId: Long, isSettled: Boolean = true) {
-        viewModelScope.launch {
-            payableDao.updateSettlementStatus(payableId, isSettled)
-        }
-    }
-
-    fun deletePayable(payableId: Long) {
-        viewModelScope.launch {
-            payableDao.deletePayableById(payableId)
-        }
     }
 
     fun isPersistedLoggedIn(): Boolean {
@@ -492,7 +436,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val currentMonthTxns = allTransactions.value.filter {
             it.category?.id == categoryId && it.transaction.transactionType == TransactionType.EXPENSE
         }
-        val spent = currentMonthTxns.sumOf { it.transaction.amount - it.transaction.reimbursementAmount }
+        val spent = currentMonthTxns.sumOf { it.transaction.amount }
         budgetNotifier.checkAndNotifyBudget(category.name, spent, budget.monthlyLimit)
     }
 
@@ -588,34 +532,33 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun setGeminiApiKey(key: String) = geminiService.setApiKey(key)
 
     suspend fun getOrCreateCategory(name: String): Long {
-        val clean = name.trim().ifEmpty { "General" }
-        val existing = categoryDao.getCategoryByName(clean)
+        val trimmed = name.trim()
+        val existing = categoryDao.getCategoryByName(trimmed)
         if (existing != null) return existing.id
-        val colors = listOf("#FF7043", "#66BB6A", "#29B6F6", "#AB47BC", "#FFA726", "#EF5350", "#7E57C2", "#26A69A", "#42A5F5", "#8D6E63", "#E91E63")
-        val randomColor = colors.random()
-        val newId = categoryDao.insertCategory(Category(name = clean, colorHex = randomColor))
-        return if (newId > 0) newId else (categoryDao.getCategoryByName(clean)?.id ?: 7L)
+        return categoryDao.insertCategory(
+            Category(
+                name = trimmed,
+                colorHex = "#7E57C2"
+            )
+        )
     }
 
-    suspend fun askGeminiFinancialAdvisor(query: String): String {
-        val currentTransactions = allTransactions.value
+    suspend fun queryGeminiFinancialAssistant(query: String): String {
+        val transactions = allTransactions.value
         val summary = monthlySpendingSummary.value
         val categories = categoryBreakdown.value
-        val subscriptions = detectedSubscriptions.value
-        val pendingOwed = totalPendingSettlements.value
 
         val contextBuilder = StringBuilder()
-        contextBuilder.append("Current Month: ${selectedMonth.value.label}\n")
-        contextBuilder.append("Total Net Spending: ₹${String.format(Locale.US, "%.2f", summary.netExpense)}\n")
-        contextBuilder.append("Total Gross Spending: ₹${String.format(Locale.US, "%.2f", summary.grossExpense)}\n")
-        contextBuilder.append("Total Money Owed via Splits: ₹${String.format(Locale.US, "%.2f", pendingOwed)}\n")
-        contextBuilder.append("Category Breakdown:\n")
-        categories.forEach {
-            contextBuilder.append("- ${it.categoryName}: ₹${String.format(Locale.US, "%.2f", it.totalAmount)} (${String.format(Locale.US, "%.1f", it.percentage)}%)\n")
+        contextBuilder.append("Total Gross Spend: ₹${summary.grossExpense}\n")
+        contextBuilder.append("Total Reimbursements: ₹${summary.totalReimbursements}\n")
+        contextBuilder.append("Net Spend: ₹${summary.netExpense}\n")
+        contextBuilder.append("Top Spending Categories:\n")
+        categories.take(5).forEach {
+            contextBuilder.append("- ${it.categoryName}: ₹${it.totalAmount} (${String.format(Locale.ROOT, "%.1f", it.percentage)}%)\n")
         }
-        contextBuilder.append("Active Subscriptions:\n")
-        subscriptions.forEach {
-            contextBuilder.append("- ${it.merchantName}: ₹${String.format(Locale.US, "%.2f", it.averageAmount)} (Every ~${it.cadenceDays} days)\n")
+        contextBuilder.append("Recent Transactions:\n")
+        transactions.take(15).forEach {
+            contextBuilder.append("- ${it.transaction.merchantName}: ₹${it.transaction.amount} (${it.category?.name ?: "General"}, ${it.transaction.transactionType})\n")
         }
 
         return geminiService.answerFinancialQuery(contextBuilder.toString(), query)
@@ -631,9 +574,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         type: TransactionType,
         categoryId: Long,
         accountId: Long,
-        isSplit: Boolean,
-        reimbursementAmount: Double,
-        peerName: String?,
         notes: String?,
         saveRule: Boolean,
         keyword: String,
@@ -655,10 +595,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     transactionType = type,
                     accountId = accountId,
                     categoryId = resolvedCategoryId,
-                    isSplit = isSplit,
-                    reimbursementAmount = reimbursementAmount,
-                    settled = false,
-                    peerName = peerName,
                     notes = notes
                 )
             )
@@ -720,12 +656,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun markSettled(transactionId: Long, settled: Boolean = true) {
-        viewModelScope.launch {
-            transactionDao.updateSettlementStatus(transactionId, settled)
-        }
-    }
-
     fun addManualTransaction(
         amount: Double,
         merchantName: String,
@@ -733,9 +663,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         categoryId: Long,
         accountId: Long,
         timestamp: Long = System.currentTimeMillis(),
-        isSplit: Boolean = false,
-        reimbursementAmount: Double = 0.0,
-        peerName: String? = null,
         notes: String? = null,
         customCategoryName: String? = null
     ) {
@@ -754,10 +681,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     transactionType = type,
                     accountId = accountId,
                     categoryId = resolvedCategoryId,
-                    isSplit = isSplit,
-                    reimbursementAmount = reimbursementAmount,
-                    settled = false,
-                    peerName = peerName,
                     notes = notes
                 )
             )

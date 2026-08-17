@@ -43,10 +43,6 @@ data class TransactionEntity(
     val transactionType: TransactionType = TransactionType.EXPENSE,
     val accountId: Long,
     val categoryId: Long,
-    val isSplit: Boolean = false,
-    val reimbursementAmount: Double = 0.0,
-    val settled: Boolean = false,
-    val peerName: String? = null,
     val notes: String? = null
 )
 

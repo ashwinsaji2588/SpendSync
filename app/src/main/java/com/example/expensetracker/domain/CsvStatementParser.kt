@@ -193,9 +193,6 @@ class CsvStatementParser(
                         transactionType = type,
                         accountId = defaultAccountId,
                         categoryId = categoryId,
-                        isSplit = false,
-                        reimbursementAmount = 0.0,
-                        settled = false,
                         notes = "Imported from statement ($descStr)"
                     )
                 )

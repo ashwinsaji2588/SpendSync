@@ -14,10 +14,9 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         Category::class,
         CategoryRule::class,
         TransactionEntity::class,
-        Budget::class,
-        PayableEntity::class
+        Budget::class
     ],
-    version = 5,
+    version = 6,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -28,11 +27,47 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun categoryRuleDao(): CategoryRuleDao
     abstract fun transactionDao(): TransactionDao
     abstract fun budgetDao(): BudgetDao
-    abstract fun payableDao(): PayableDao
 
     companion object {
         @Volatile
         private var INSTANCE: AppDatabase? = null
+
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("DROP TABLE IF EXISTS `payables`")
+                // Re-create transactions table if needed or clean up
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `transactions_v6` (
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `amount` REAL NOT NULL,
+                        `merchantName` TEXT NOT NULL,
+                        `timestamp` INTEGER NOT NULL,
+                        `transactionType` TEXT NOT NULL,
+                        `accountId` INTEGER NOT NULL,
+                        `categoryId` INTEGER NOT NULL,
+                        `notes` TEXT,
+                        FOREIGN KEY(`accountId`) REFERENCES `accounts`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE,
+                        FOREIGN KEY(`categoryId`) REFERENCES `categories`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    INSERT INTO `transactions_v6` (`id`, `amount`, `merchantName`, `timestamp`, `transactionType`, `accountId`, `categoryId`, `notes`)
+                    SELECT `id`, `amount`, `merchantName`, `timestamp`, `transactionType`, `accountId`, `categoryId`, `notes` FROM `transactions`
+                    """.trimIndent()
+                )
+                db.execSQL("DROP TABLE IF EXISTS `transactions`")
+                db.execSQL("ALTER TABLE `transactions_v6` RENAME TO `transactions`")
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_transactions_timestamp_amount_merchantName_accountId` ON `transactions` (`timestamp`, `amount`, `merchantName`, `accountId`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_transactions_accountId` ON `transactions` (`accountId`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_transactions_categoryId` ON `transactions` (`categoryId`)")
+
+                // Insert Reimbursements category
+                db.execSQL("INSERT OR IGNORE INTO `categories` (`name`, `colorHex`, `iconName`) VALUES ('Reimbursements', '#00897B', 'reimbursements')")
+            }
+        }
 
         val MIGRATION_4_5 = object : Migration(4, 5) {
             override fun migrate(db: SupportSQLiteDatabase) {
@@ -99,7 +134,7 @@ abstract class AppDatabase : RoomDatabase() {
                 // Seed default accounts
                 seedAccountsSql(db)
 
-                // 4. Create new transactions table with foreign keys & split columns
+                // 4. Create new transactions table with foreign keys
                 db.execSQL(
                     """
                     CREATE TABLE IF NOT EXISTS `transactions_new` (
@@ -110,10 +145,6 @@ abstract class AppDatabase : RoomDatabase() {
                         `transactionType` TEXT NOT NULL,
                         `accountId` INTEGER NOT NULL,
                         `categoryId` INTEGER NOT NULL,
-                        `isSplit` INTEGER NOT NULL DEFAULT 0,
-                        `reimbursementAmount` REAL NOT NULL DEFAULT 0.0,
-                        `settled` INTEGER NOT NULL DEFAULT 0,
-                        `peerName` TEXT,
                         `notes` TEXT,
                         FOREIGN KEY(`accountId`) REFERENCES `accounts`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE,
                         FOREIGN KEY(`categoryId`) REFERENCES `categories`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE
@@ -124,7 +155,7 @@ abstract class AppDatabase : RoomDatabase() {
                 // Migrate data from old transactions to transactions_new
                 db.execSQL(
                     """
-                    INSERT INTO `transactions_new` (`id`, `amount`, `merchantName`, `timestamp`, `transactionType`, `accountId`, `categoryId`, `isSplit`, `reimbursementAmount`, `settled`)
+                    INSERT INTO `transactions_new` (`id`, `amount`, `merchantName`, `timestamp`, `transactionType`, `accountId`, `categoryId`)
                     SELECT 
                         old.id,
                         old.amount,
@@ -132,10 +163,7 @@ abstract class AppDatabase : RoomDatabase() {
                         old.timestamp,
                         old.transactionType,
                         1 AS accountId,
-                        COALESCE(cat.id, 7) AS categoryId,
-                        0 AS isSplit,
-                        0.0 AS reimbursementAmount,
-                        0 AS settled
+                        COALESCE(cat.id, 7) AS categoryId
                     FROM `transactions` old
                     LEFT JOIN `categories` cat ON LOWER(cat.name) = LOWER(old.category)
                     """.trimIndent()
@@ -187,7 +215,8 @@ abstract class AppDatabase : RoomDatabase() {
                 Pair("Salary", "#26A69A"),
                 Pair("Freelance", "#42A5F5"),
                 Pair("Investment", "#8D6E63"),
-                Pair("Health", "#E91E63")
+                Pair("Health", "#E91E63"),
+                Pair("Reimbursements", "#00897B")
             )
             for ((name, color) in defaultCategories) {
                 db.execSQL("INSERT OR IGNORE INTO `categories` (`name`, `colorHex`) VALUES ('$name', '$color')")
@@ -205,7 +234,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "expense_tracker_database"
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
                     .fallbackToDestructiveMigration(true)
                     .addCallback(object : Callback() {
                         override fun onCreate(db: SupportSQLiteDatabase) {
@@ -241,9 +270,14 @@ abstract class AppDatabase : RoomDatabase() {
                         Category(name = "Salary", iconName = "salary", colorHex = "#26A69A"),
                         Category(name = "Freelance", iconName = "freelance", colorHex = "#42A5F5"),
                         Category(name = "Investment", iconName = "investment", colorHex = "#8D6E63"),
-                        Category(name = "Health", iconName = "health", colorHex = "#E91E63")
+                        Category(name = "Health", iconName = "health", colorHex = "#E91E63"),
+                        Category(name = "Reimbursements", iconName = "reimbursements", colorHex = "#00897B")
                     )
                     categoryDao.insertCategories(categories)
+                } else {
+                    if (categoryDao.getCategoryByName("Reimbursements") == null) {
+                        categoryDao.insertCategory(Category(name = "Reimbursements", iconName = "reimbursements", colorHex = "#00897B"))
+                    }
                 }
 
                 // Clean up any previously auto-generated placeholder accounts with 0 transactions

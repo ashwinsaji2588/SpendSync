@@ -275,9 +275,7 @@ class SmsParserEngine(
             transactionType = raw.transactionType,
             accountId = accountId,
             categoryId = categoryId,
-            isSplit = false,
-            reimbursementAmount = 0.0,
-            settled = false
+            notes = null
         )
     }
 
@@ -286,6 +284,20 @@ class SmsParserEngine(
      */
     fun categorizeMerchantKeywords(merchant: String, fullSms: String = ""): String? {
         val text = "${merchant.lowercase(Locale.ROOT)} ${fullSms.lowercase(Locale.ROOT)}"
+
+        // Check if this is an incoming income/credit message
+        val isCreditMessage = text.contains("credited") || text.contains("received")
+
+        if (isCreditMessage) {
+            return when {
+                text.containsAny("salary", "payroll", "stipend", "wages", "employer", "salary credited") -> "Salary"
+                text.containsAny("freelance", "upwork", "fiverr", "consulting", "client payment") -> "Freelance"
+                text.containsAny("dividend", "interest credited", "fd maturity", "rd credit", "redemption", "zerodha", "groww") -> "Investment"
+                // Peer-to-peer UPI transfers, VPA transfers, shared bill payback
+                text.containsAny("vpa", "upi", "from", "transferred", "sent to you", "received from", "p2p", "refund") -> "Reimbursements"
+                else -> "Reimbursements"
+            }
+        }
 
         return when {
             // 1. Food / Dining / Restaurants & Cafes
@@ -303,40 +315,36 @@ class SmsParserEngine(
 
             // 2. Groceries & Supermarkets
             text.containsAny(
-                "instamart", "blinkit", "zepto", "bigbasket", "jiomart", "dmart",
-                "nature's basket", "more retail", "spencers", "reliance fresh",
-                "reliance smart", "nilgiris", "supplyco", "supermarket", "hypermarket",
-                "kirana", "provisions", "mart", "grocery", "dairy", "fresh",
-                "vegetable", "fruit", "organic", "meat", "fish", "spices", "store"
+                "blinkit", "zepto", "instamart", "bigbasket", "dmart", "spencer",
+                "reliance fresh", "reliance smart", "more supermarket", "nature's basket",
+                "lulu", "supermarket", "hypermarket", "grocery", "provision", "mart",
+                "kirana", "dairy", "milk", "vegetable", "fruits", "meat", "fish"
             ) -> "Grocery"
 
-            // 3. Shopping & Fashion / Retail
+            // 3. Shopping & E-Commerce
             text.containsAny(
-                "amazon", "flipkart", "myntra", "ajio", "zara", "h&m", "nykaa",
-                "meesho", "tata cliq", "reliance trends", "max fashion", "westside",
-                "pantaloons", "shoppers stop", "decathlon", "croma", "vijay sales",
-                "reliance digital", "apple", "lenskart", "titan", "tanishq", "kalyan",
-                "malabar gold", "joyalukkas", "jos alukkas", "bhima", "lulu mall",
-                "mall", "retail", "fashion", "clothing", "apparel", "footwear",
-                "jewels", "jewellers", "boutique", "trends", "wear", "electronics",
-                "gadgets", "outlet", "tailor", "garments", "beauty", "cosmetics"
+                "amazon", "flipkart", "myntra", "meesho", "ajio", "nykaa",
+                "tata cliq", "zara", "h&m", "uniqlo", "marks & spencer", "westside",
+                "trends", "max fashion", "pantaloons", "shoppers stop", "lifestyle",
+                "croma", "reliance digital", "vijay sales", "apple", "samsung",
+                "decathlon", "ikea", "lenskart", "titan", "shopping", "store",
+                "retail", "clothing", "apparel", "footwear", "electronics"
             ) -> "Shopping"
 
-            // 4. Utilities, Recharge & Bills
+            // 4. Bills, Utilities, Recharges & Subscriptions
             text.containsAny(
-                "kseb", "electricity", "water authority", "kerala water", "jal board",
-                "bescom", "msedcl", "tneb", "wbsedcl", "bses", "torrent power",
-                "tata power", "airtel", "jio", "vi ", "vodafone", "idea", "bsnl",
-                "act fibernet", "hathway", "asianet", "tata play", "dish tv",
-                "sun direct", "dth", "recharge", "broadband", "fiber", "indane",
-                "bharat gas", "hp gas", "igl", "insurance", "lic", "hdfc ergo",
-                "policybazaar", "star health", "utility", "billdesk", "bbps"
+                "electricity", "bescom", "kseb", "tneb", "mseb", "uppcl",
+                "water", "gas", "indane", "hp gas", "bharat gas", "piped gas",
+                "airtel", "jio", "vi ", "vodafone", "idea", "bsnl", "broadband",
+                "act fibernet", "tataplay", "tata sky", "dish tv", "dth", "recharge",
+                "bill desk", "bbps", "credit card bill", "loan emi", "insurance",
+                "lic", "hdfc ergo", "star health", "policy", "premium", "rent"
             ) -> "Bills & Utilities"
 
-            // 5. Travel, Transport & Fuel
+            // 5. Travel, Cabs, Transit & Fuel
             text.containsAny(
-                "uber", "ola", "rapido", "namma yatri", "irctc", "railway", "redbus",
-                "abhibus", "makemytrip", "goibibo", "cleartrip", "yatra", "indigo",
+                "uber", "ola", "rapido", "namma yatri", "blusmart", "irctc",
+                "redbus", "abhibus", "makemytrip", "goibibo", "easemytrip", "cleartrip",
                 "air india", "spicejet", "akasa", "vistara", "fastag", "toll",
                 "metro", "kochi metro", "bangalore metro", "delhi metro", "petrol",
                 "diesel", "fuel", "iocl", "indian oil", "bpcl", "bharat petroleum",
