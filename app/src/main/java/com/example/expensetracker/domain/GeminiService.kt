@@ -45,7 +45,7 @@ class GeminiService(private val context: Context) {
      * POST https://generativelanguage.googleapis.com/v1beta/models/{modelName}:generateContent?key={apiKey}
      */
     private fun callGeminiRestApi(prompt: String, apiKey: String, modelName: String): String? {
-        val cleanModel = modelName.removePrefix("models/")
+        val cleanModel = modelName.trim().removePrefix("models/").removePrefix("/")
         val url = "https://generativelanguage.googleapis.com/v1beta/models/$cleanModel:generateContent?key=$apiKey"
 
         // Build standard JSON payload: contents -> parts -> text

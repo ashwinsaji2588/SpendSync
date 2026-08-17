@@ -1999,48 +1999,57 @@ fun CategoryRulesDialog(
                                 modifier = Modifier.fillMaxWidth(),
                                 shape = RoundedCornerShape(16.dp),
                                 colors = CardDefaults.elevatedCardColors(
-                                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+                                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
                                 )
                             ) {
                                 Column(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(14.dp)
+                                        .padding(horizontal = 16.dp, vertical = 14.dp)
                                 ) {
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
                                         horizontalArrangement = Arrangement.SpaceBetween,
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            modifier = Modifier.weight(1f, fill = false)
+                                        ) {
+                                            val catColor = try {
+                                                Color(android.graphics.Color.parseColor(category.colorHex))
+                                            } catch (e: Exception) {
+                                                MaterialTheme.colorScheme.primary
+                                            }
                                             Box(
                                                 modifier = Modifier
                                                     .size(10.dp)
                                                     .clip(CircleShape)
-                                                    .background(
-                                                        try {
-                                                            Color(android.graphics.Color.parseColor(category.colorHex))
-                                                        } catch (e: Exception) {
-                                                            MaterialTheme.colorScheme.primary
-                                                        }
-                                                    )
+                                                    .background(catColor)
                                             )
                                             Spacer(modifier = Modifier.width(8.dp))
                                             Text(
                                                 text = category.name,
                                                 fontWeight = FontWeight.Bold,
-                                                fontSize = 14.sp,
+                                                fontSize = 15.sp,
                                                 color = MaterialTheme.colorScheme.onSurface
                                             )
                                         }
-                                        Text(
-                                            text = "${catRules.size} keyword${if (catRules.size != 1) "s" else ""}",
-                                            fontSize = 11.sp,
-                                            color = MaterialTheme.colorScheme.outline
-                                        )
+                                        Surface(
+                                            shape = RoundedCornerShape(6.dp),
+                                            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f)
+                                        ) {
+                                            Text(
+                                                text = "${catRules.size} keyword${if (catRules.size != 1) "s" else ""}",
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Medium,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                            )
+                                        }
                                     }
 
-                                    Spacer(modifier = Modifier.height(10.dp))
+                                    Spacer(modifier = Modifier.height(12.dp))
 
                                     FlowRow(
                                         modifier = Modifier.fillMaxWidth(),
@@ -2054,7 +2063,7 @@ fun CategoryRulesDialog(
                                                 label = {
                                                     Text(
                                                         text = rule.merchantKeyword,
-                                                        fontSize = 12.sp,
+                                                        fontSize = 13.sp,
                                                         fontWeight = FontWeight.Medium
                                                     )
                                                 },
