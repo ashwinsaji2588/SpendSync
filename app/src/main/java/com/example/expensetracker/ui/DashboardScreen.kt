@@ -294,15 +294,6 @@ fun DashboardScreen(
                         showSupportDialog = true
                         coroutineScope.launch { drawerState.close() }
                     },
-                    onOpenNotificationSettings = {
-                        coroutineScope.launch { drawerState.close() }
-                        try {
-                            val intent = Intent("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS")
-                            context.startActivity(intent)
-                        } catch (e: Exception) {
-                            Toast.makeText(context, "Could not open notification settings", Toast.LENGTH_SHORT).show()
-                        }
-                    },
                     onSignOut = {
                         coroutineScope.launch { drawerState.close() }
                         viewModel.signOut {
@@ -900,7 +891,6 @@ fun SidebarContent(
     onExportCsv: () -> Unit,
     onOpenRules: () -> Unit,
     onOpenSupport: () -> Unit,
-    onOpenNotificationSettings: () -> Unit,
     onSignOut: () -> Unit
 ) {
     val scrollState = rememberScrollState()
@@ -1091,14 +1081,6 @@ fun SidebarContent(
             selected = false,
             onClick = onOpenRules,
             icon = { Icon(Icons.Default.Edit, contentDescription = null) }
-        )
-
-        // GPay Notification Listener Settings
-        NavigationDrawerItem(
-            label = { Text("UPI Split Listener") },
-            selected = false,
-            onClick = onOpenNotificationSettings,
-            icon = { Icon(Icons.Default.Notifications, contentDescription = null) }
         )
 
         // Support & Help
@@ -1899,53 +1881,53 @@ fun CategoryRulesDialog(
                     .fillMaxSize()
                     .padding(18.dp)
             ) {
-                // Header
+                // Header Row 1: Title & Close Button
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
-                        Text(
-                            text = "Auto-Categorize Rules",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 18.sp,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Text(
-                            text = "${rules.size} active keyword mapping${if (rules.size != 1) "s" else ""}",
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    Text(
+                        text = "Auto-Categorize Rules",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 18.sp,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    IconButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.size(32.dp)
                     ) {
-                        FilledTonalButton(
-                            onClick = { showAddSheet = true },
-                            shape = RoundedCornerShape(12.dp),
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                            modifier = Modifier.wrapContentWidth()
-                        ) {
-                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = "Add",
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                maxLines = 1,
-                                softWrap = false
-                            )
-                        }
-                        IconButton(
-                            onClick = onDismiss,
-                            modifier = Modifier.size(36.dp)
-                        ) {
-                            Icon(Icons.Default.Close, contentDescription = "Close", modifier = Modifier.size(20.dp))
-                        }
+                        Icon(Icons.Default.Close, contentDescription = "Close", modifier = Modifier.size(20.dp))
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(4.dp))
+
+                // Header Row 2: Rule Count & Add Button
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "${rules.size} active keyword mapping${if (rules.size != 1) "s" else ""}",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    FilledTonalButton(
+                        onClick = { showAddSheet = true },
+                        shape = RoundedCornerShape(10.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(15.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "Add Rule",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            softWrap = false
+                        )
                     }
                 }
 
