@@ -32,8 +32,9 @@ class GeminiService(private val context: Context) {
     private fun getModel(modelName: String = "gemini-2.0-flash"): GenerativeModel? {
         val apiKey = getApiKey()
         if (apiKey.isBlank()) return null
+        val cleanModelName = modelName.removePrefix("models/")
         return GenerativeModel(
-            modelName = modelName,
+            modelName = cleanModelName,
             apiKey = apiKey
         )
     }
@@ -58,10 +59,11 @@ class GeminiService(private val context: Context) {
             SMS: "$smsText"
         """.trimIndent()
 
-        val modelsToTry = listOf("gemini-2.0-flash", "gemini-1.5-pro", "gemini-2.0-flash-lite", "gemini-1.5-flash-latest")
+        val modelsToTry = listOf("gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash-lite")
         for (modelName in modelsToTry) {
             try {
-                val model = GenerativeModel(modelName = modelName, apiKey = apiKey)
+                val cleanModelName = modelName.removePrefix("models/")
+                val model = GenerativeModel(modelName = cleanModelName, apiKey = apiKey)
                 val response = model.generateContent(prompt)
                 val rawText = response.text?.trim() ?: continue
                 val cleanJson = rawText
@@ -119,11 +121,12 @@ class GeminiService(private val context: Context) {
             Provide a helpful, actionable, concise, and friendly answer. Keep bullet points crisp.
         """.trimIndent()
 
-        val modelsToTry = listOf("gemini-2.0-flash", "gemini-1.5-pro", "gemini-2.0-flash-lite", "gemini-1.5-flash-latest")
+        val modelsToTry = listOf("gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash-lite")
         var lastError: String? = null
         for (modelName in modelsToTry) {
             try {
-                val model = GenerativeModel(modelName = modelName, apiKey = apiKey)
+                val cleanModelName = modelName.removePrefix("models/")
+                val model = GenerativeModel(modelName = cleanModelName, apiKey = apiKey)
                 val response = model.generateContent(prompt)
                 val text = response.text?.trim()
                 if (!text.isNullOrBlank()) {
