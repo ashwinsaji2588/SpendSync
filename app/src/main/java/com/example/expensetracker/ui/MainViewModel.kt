@@ -15,6 +15,7 @@ import com.example.expensetracker.data.Budget
 import com.example.expensetracker.data.BudgetWithCategory
 import com.example.expensetracker.data.Category
 import com.example.expensetracker.data.CategoryRule
+import com.example.expensetracker.data.PayableEntity
 import com.example.expensetracker.data.TransactionEntity
 import com.example.expensetracker.data.TransactionType
 import com.example.expensetracker.data.TransactionWithDetails
@@ -73,6 +74,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val categoryDao = db.categoryDao()
     private val categoryRuleDao = db.categoryRuleDao()
     private val budgetDao = db.budgetDao()
+    private val payableDao = db.payableDao()
 
     private val smsScanner = HistoricalSmsScanner(application, db)
     private val csvParser = CsvStatementParser(application, db)
@@ -81,6 +83,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val subscriptionDetector = SubscriptionDetector()
 
     private val prefs = application.getSharedPreferences("expense_tracker_prefs", Context.MODE_PRIVATE)
+
+    // Privacy Mode (Masked Balances) - default false (masked on login/startup)
+    private val _isBalanceVisible = MutableStateFlow(
+        prefs.getBoolean(PREF_BALANCE_VISIBLE, false)
+    )
+    val isBalanceVisible: StateFlow<Boolean> = _isBalanceVisible.asStateFlow()
 
     // Dark theme state: null = system default, true = dark mode, false = light mode
     private val _isDarkMode = MutableStateFlow<Boolean?>(
@@ -285,6 +293,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             initialValue = 0.0
         )
 
+    // Payables Ledger (Owed By Me to friends / creditors)
+    val activePayables: StateFlow<List<PayableEntity>> = payableDao
+        .getActivePayables()
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyList()
+        )
+
+    val totalOwedByMe: StateFlow<Double> = payableDao
+        .getTotalOwedAmount()
+        .map { it ?: 0.0 }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = 0.0
+        )
+
     init {
         viewModelScope.launch {
             AppDatabase.seedInitialData(db)
@@ -327,6 +353,38 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         prefs.edit().putBoolean(PREF_IS_LOGGED_IN, loggedIn).apply()
     }
 
+    fun toggleBalanceVisibility() {
+        val next = !_isBalanceVisible.value
+        _isBalanceVisible.value = next
+        prefs.edit().putBoolean(PREF_BALANCE_VISIBLE, next).apply()
+    }
+
+    fun addPayable(creditorName: String, amount: Double, description: String = "") {
+        viewModelScope.launch {
+            payableDao.insertPayable(
+                PayableEntity(
+                    creditorName = creditorName.trim(),
+                    amount = amount,
+                    description = description.trim(),
+                    timestamp = System.currentTimeMillis(),
+                    isSettled = false
+                )
+            )
+        }
+    }
+
+    fun markPayableSettled(payableId: Long, isSettled: Boolean = true) {
+        viewModelScope.launch {
+            payableDao.updateSettlementStatus(payableId, isSettled)
+        }
+    }
+
+    fun deletePayable(payableId: Long) {
+        viewModelScope.launch {
+            payableDao.deletePayableById(payableId)
+        }
+    }
+
     fun isPersistedLoggedIn(): Boolean {
         return prefs.getBoolean(PREF_IS_LOGGED_IN, false)
     }
@@ -358,14 +416,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         viewModelScope.launch {
             _isScanning.value = true
-            _scanMessage.value = "Scanning SMS inbox for bank transactions..."
+            _scanMessage.value = "Scanning SMS and reapplying category rules..."
             try {
                 val count = smsScanner.scanInbox()
+                val reclassifiedCount = reapplyAllRulesToExistingTransactions()
                 prefs.edit().putBoolean(PREF_INITIAL_SCAN_DONE, true).apply()
-                _scanMessage.value = if (count > 0) {
-                    "Successfully imported $count transaction${if (count > 1) "s" else ""} from SMS inbox"
-                } else {
-                    "No new bank transactions found"
+                _scanMessage.value = when {
+                    count > 0 && reclassifiedCount > 0 -> "Imported $count new txn(s) & updated $reclassifiedCount with your rules"
+                    count > 0 -> "Successfully imported $count transaction${if (count > 1) "s" else ""} from SMS inbox"
+                    reclassifiedCount > 0 -> "Refreshed & applied category rules across $reclassifiedCount transactions"
+                    else -> "All transactions up-to-date and rules applied"
                 }
             } catch (e: Exception) {
                 _scanMessage.value = "Failed to scan SMS: ${e.localizedMessage}"
@@ -597,12 +657,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             )
 
             if (saveRule && keyword.isNotBlank()) {
+                val cleanKw = keyword.trim().lowercase(Locale.ROOT)
                 categoryRuleDao.insertRule(
                     CategoryRule(
-                        merchantKeyword = keyword.trim().lowercase(Locale.ROOT),
+                        merchantKeyword = cleanKw,
                         targetCategoryId = resolvedCategoryId
                     )
                 )
+                // Retroactively update all existing matching transactions
+                transactionDao.updateCategoryForMatchingMerchants(cleanKw, resolvedCategoryId)
             }
 
             checkCategoryBudgetAlert(resolvedCategoryId)
@@ -621,13 +684,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 targetCategoryId
             }
 
+            val cleanKw = merchantKeyword.trim().lowercase(Locale.ROOT)
             categoryRuleDao.insertRule(
                 CategoryRule(
-                    merchantKeyword = merchantKeyword.trim().lowercase(Locale.ROOT),
+                    merchantKeyword = cleanKw,
                     targetCategoryId = resolvedCategoryId
                 )
             )
+
+            // Retroactively update all existing matching transactions
+            transactionDao.updateCategoryForMatchingMerchants(cleanKw, resolvedCategoryId)
         }
+    }
+
+    suspend fun reapplyAllRulesToExistingTransactions(): Int {
+        val rules = categoryRuleDao.getAllRules()
+        var updatedCount = 0
+        for (rule in rules) {
+            val count = transactionDao.updateCategoryForMatchingMerchants(rule.merchantKeyword, rule.targetCategoryId)
+            updatedCount += count
+        }
+        return updatedCount
     }
 
     fun deleteCategoryRule(rule: CategoryRule) {
@@ -732,6 +809,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         private const val PREF_DARK_MODE = "pref_dark_mode"
         private const val PREF_IS_LOGGED_IN = "pref_is_logged_in"
         private const val PREF_BIOMETRIC_ENABLED = "pref_biometric_enabled"
+        private const val PREF_BALANCE_VISIBLE = "pref_balance_visible"
     }
 }
 

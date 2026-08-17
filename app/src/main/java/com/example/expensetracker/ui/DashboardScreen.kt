@@ -44,6 +44,8 @@ import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Notifications
@@ -53,6 +55,8 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.ShoppingCart
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -152,6 +156,9 @@ fun DashboardScreen(
     val detectedSubscriptions by viewModel.detectedSubscriptions.collectAsState()
     val pendingSettlements by viewModel.pendingSettlements.collectAsState()
     val totalPendingSettlements by viewModel.totalPendingSettlements.collectAsState()
+    val activePayables by viewModel.activePayables.collectAsState()
+    val totalOwedByMe by viewModel.totalOwedByMe.collectAsState()
+    val isBalanceVisible by viewModel.isBalanceVisible.collectAsState()
     val isScanning by viewModel.isScanning.collectAsState()
     val scanMessage by viewModel.scanMessage.collectAsState()
     val importMessage by viewModel.importMessage.collectAsState()
@@ -162,6 +169,7 @@ fun DashboardScreen(
     var showManualAddDialog by remember { mutableStateOf(false) }
     var showRulesManagerDialog by remember { mutableStateOf(false) }
     var showSettlementsDialog by remember { mutableStateOf(false) }
+    var showPayablesDialog by remember { mutableStateOf(false) }
     var showBudgetsDialog by remember { mutableStateOf(false) }
     var showSubscriptionsDialog by remember { mutableStateOf(false) }
     var showSupportDialog by remember { mutableStateOf(false) }
@@ -238,6 +246,8 @@ fun DashboardScreen(
                     selectedAccount = selectedAccount,
                     pendingSettlementsCount = pendingSettlements.size,
                     totalPendingAmount = totalPendingSettlements,
+                    activePayablesCount = activePayables.size,
+                    totalOwedAmount = totalOwedByMe,
                     isDarkMode = isDarkMode,
                     isBiometricEnabled = isBiometricEnabled,
                     onToggleTheme = { dark -> viewModel.setThemeMode(dark) },
@@ -276,6 +286,10 @@ fun DashboardScreen(
                     },
                     onOpenSettlements = {
                         showSettlementsDialog = true
+                        coroutineScope.launch { drawerState.close() }
+                    },
+                    onOpenPayables = {
+                        showPayablesDialog = true
                         coroutineScope.launch { drawerState.close() }
                     },
                     onOpenRules = {
@@ -583,7 +597,9 @@ fun DashboardScreen(
                         MonthlyExpensesCard(
                             summary = spendingSummary,
                             monthLabel = selectedMonth.label,
-                            accountLabel = selectedAccount?.let { it.nickname ?: it.name } ?: "All Accounts"
+                            accountLabel = selectedAccount?.let { it.nickname ?: it.name } ?: "All Accounts",
+                            isBalanceVisible = isBalanceVisible,
+                            onToggleVisibility = { viewModel.toggleBalanceVisibility() }
                         )
                     }
 
@@ -596,13 +612,24 @@ fun DashboardScreen(
                         )
                     }
 
-                    // Pending Settlements Quick Card (if any pending)
+                    // Pending Settlements Quick Card (Owed To Me)
                     if (pendingSettlements.isNotEmpty()) {
                         item {
                             PendingSettlementsBanner(
                                 pendingCount = pendingSettlements.size,
                                 totalAmount = totalPendingSettlements,
                                 onClick = { showSettlementsDialog = true }
+                            )
+                        }
+                    }
+
+                    // Owed By Me (Payables Ledger) Quick Card
+                    if (activePayables.isNotEmpty()) {
+                        item {
+                            PayablesBanner(
+                                pendingCount = activePayables.size,
+                                totalAmount = totalOwedByMe,
+                                onClick = { showPayablesDialog = true }
                             )
                         }
                     }
@@ -849,6 +876,10 @@ fun DashboardScreen(
             accounts = allAccounts,
             categories = allCategories,
             onDismiss = { showManualAddDialog = false },
+            onSavePayable = { creditor, amount, desc ->
+                viewModel.addPayable(creditor, amount, desc)
+                showManualAddDialog = false
+            },
             onSave = { amount, merchant, type, categoryId, accountId, isSplit, reimbursementAmount, peerName, customCat ->
                 viewModel.addManualTransaction(
                     amount = amount,
@@ -866,12 +897,23 @@ fun DashboardScreen(
         )
     }
 
-    // Pending Settlements Dialog / List
+    // Pending Settlements Dialog / List (Owed To Me)
     if (showSettlementsDialog) {
         PendingSettlementsDialog(
             settlements = pendingSettlements,
             onDismiss = { showSettlementsDialog = false },
             onMarkSettled = { id -> viewModel.markSettled(id, true) }
+        )
+    }
+
+    // Payables Ledger Dialog (Owed By Me)
+    if (showPayablesDialog) {
+        PayablesDialog(
+            payables = activePayables,
+            onDismiss = { showPayablesDialog = false },
+            onMarkSettled = { id -> viewModel.markPayableSettled(id, true) },
+            onDeletePayable = { id -> viewModel.deletePayable(id) },
+            onAddPayable = { name, amt, desc -> viewModel.addPayable(name, amt, desc) }
         )
     }
 
@@ -893,6 +935,8 @@ fun SidebarContent(
     selectedAccount: Account?,
     pendingSettlementsCount: Int,
     totalPendingAmount: Double,
+    activePayablesCount: Int,
+    totalOwedAmount: Double,
     isDarkMode: Boolean?,
     isBiometricEnabled: Boolean,
     onToggleTheme: (Boolean?) -> Unit,
@@ -906,6 +950,7 @@ fun SidebarContent(
     onImportCsv: () -> Unit,
     onExportCsv: () -> Unit,
     onOpenSettlements: () -> Unit,
+    onOpenPayables: () -> Unit,
     onOpenRules: () -> Unit,
     onOpenSupport: () -> Unit,
     onOpenNotificationSettings: () -> Unit,
@@ -913,6 +958,11 @@ fun SidebarContent(
 ) {
     val scrollState = rememberScrollState()
     val indianLocale = remember { Locale.Builder().setLanguage("en").setRegion("IN").build() }
+    val context = LocalContext.current
+    val sidebarPrefs = remember { context.getSharedPreferences("expense_tracker_prefs", android.content.Context.MODE_PRIVATE) }
+    var isAccountsExpanded by remember {
+        mutableStateOf(sidebarPrefs.getBoolean("pref_accounts_section_expanded", true))
+    }
 
     Column(
         modifier = Modifier
@@ -942,20 +992,39 @@ fun SidebarContent(
 
         Spacer(modifier = Modifier.height(18.dp))
 
-        // Accounts section title with Add Button
+        // Accounts section title with Collapse/Expand Arrow & Add Button
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 4.dp),
+                .padding(horizontal = 4.dp, vertical = 4.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(
-                text = "ACCOUNTS & CARDS",
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.outline
-            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .clickable {
+                        val next = !isAccountsExpanded
+                        isAccountsExpanded = next
+                        sidebarPrefs.edit().putBoolean("pref_accounts_section_expanded", next).apply()
+                    }
+                    .padding(vertical = 4.dp)
+            ) {
+                Text(
+                    text = "ACCOUNTS & CARDS",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.outline
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Icon(
+                    imageVector = if (isAccountsExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                    contentDescription = if (isAccountsExpanded) "Collapse Accounts" else "Expand Accounts",
+                    tint = MaterialTheme.colorScheme.outline,
+                    modifier = Modifier.size(16.dp)
+                )
+            }
+
             IconButton(
                 onClick = onAddNewAccount,
                 modifier = Modifier.size(24.dp)
@@ -978,49 +1047,52 @@ fun SidebarContent(
             modifier = Modifier.padding(vertical = 2.dp)
         )
 
-        accounts.forEach { account ->
-            val isSelected = selectedAccount?.id == account.id
-            val icon = when (account.type) {
-                AccountType.CREDIT_CARD -> Icons.Default.ShoppingCart
-                AccountType.DEBIT_CARD -> Icons.Default.AccountBox
-                AccountType.CASH -> Icons.Default.Person
-                AccountType.WALLET -> Icons.Default.Share
-                else -> Icons.Default.AccountBox
-            }
-            val displayName = account.nickname ?: account.name
-            NavigationDrawerItem(
-                label = {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(displayName, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal)
-                            if (account.nickname != null) {
-                                Text(account.name, fontSize = 10.sp, color = MaterialTheme.colorScheme.outline)
-                            } else {
-                                Text(account.type.name.replace("_", " "), fontSize = 10.sp, color = MaterialTheme.colorScheme.outline)
+        // Collapsible accounts list
+        if (isAccountsExpanded) {
+            accounts.forEach { account ->
+                val isSelected = selectedAccount?.id == account.id
+                val icon = when (account.type) {
+                    AccountType.CREDIT_CARD -> Icons.Default.ShoppingCart
+                    AccountType.DEBIT_CARD -> Icons.Default.AccountBox
+                    AccountType.CASH -> Icons.Default.Person
+                    AccountType.WALLET -> Icons.Default.Share
+                    else -> Icons.Default.AccountBox
+                }
+                val displayName = account.nickname ?: account.name
+                NavigationDrawerItem(
+                    label = {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(displayName, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal)
+                                if (account.nickname != null) {
+                                    Text(account.name, fontSize = 10.sp, color = MaterialTheme.colorScheme.outline)
+                                } else {
+                                    Text(account.type.name.replace("_", " "), fontSize = 10.sp, color = MaterialTheme.colorScheme.outline)
+                                }
+                            }
+                            IconButton(
+                                onClick = { onEditAccount(account) },
+                                modifier = Modifier.size(24.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Edit,
+                                    contentDescription = "Edit Account",
+                                    tint = MaterialTheme.colorScheme.outline,
+                                    modifier = Modifier.size(14.dp)
+                                )
                             }
                         }
-                        IconButton(
-                            onClick = { onEditAccount(account) },
-                            modifier = Modifier.size(24.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Edit,
-                                contentDescription = "Edit Account",
-                                tint = MaterialTheme.colorScheme.outline,
-                                modifier = Modifier.size(14.dp)
-                            )
-                        }
-                    }
-                },
-                selected = isSelected,
-                onClick = { onAccountSelected(account) },
-                icon = { Icon(icon, contentDescription = null) },
-                modifier = Modifier.padding(vertical = 2.dp)
-            )
+                    },
+                    selected = isSelected,
+                    onClick = { onAccountSelected(account) },
+                    icon = { Icon(icon, contentDescription = null) },
+                    modifier = Modifier.padding(vertical = 2.dp)
+                )
+            }
         }
 
         Spacer(modifier = Modifier.height(14.dp))
@@ -1082,7 +1154,7 @@ fun SidebarContent(
             icon = { Icon(Icons.Default.Share, contentDescription = null) }
         )
 
-        // Pending Settlements section
+        // Pending Settlements section (Owed to Me)
         NavigationDrawerItem(
             label = {
                 Row(
@@ -1104,6 +1176,30 @@ fun SidebarContent(
             selected = false,
             onClick = onOpenSettlements,
             icon = { Icon(Icons.Default.Person, contentDescription = null) }
+        )
+
+        // Owed by Me section (Payables)
+        NavigationDrawerItem(
+            label = {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Owed by Me")
+                    if (activePayablesCount > 0) {
+                        Text(
+                            text = "₹${String.format(indianLocale, "%.0f", totalOwedAmount)}",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFFD84315)
+                        )
+                    }
+                }
+            },
+            selected = false,
+            onClick = onOpenPayables,
+            icon = { Icon(Icons.Default.AccountBox, contentDescription = null, tint = Color(0xFFD84315)) }
         )
 
         // Auto-Rules item
@@ -1259,7 +1355,9 @@ fun EditAccountNicknameDialog(
 fun MonthlyExpensesCard(
     summary: MonthlySpendingSummary,
     monthLabel: String,
-    accountLabel: String
+    accountLabel: String,
+    isBalanceVisible: Boolean,
+    onToggleVisibility: () -> Unit
 ) {
     val indianLocale = remember { Locale.Builder().setLanguage("en").setRegion("IN").build() }
     val formattedNet = remember(summary.netExpense) {
@@ -1270,6 +1368,21 @@ fun MonthlyExpensesCard(
     }
     val formattedReimbursement = remember(summary.totalReimbursements) {
         "₹${String.format(indianLocale, "%.2f", summary.totalReimbursements)}"
+    }
+
+    fun maskAmount(amountStr: String): String {
+        val prefix = "₹"
+        val numeric = amountStr.removePrefix("₹").trim()
+        if (numeric.isEmpty()) return "₹****"
+        val parts = numeric.split(".")
+        val integerPart = parts[0]
+        val maskedInteger = if (integerPart.length <= 2) {
+            "*"
+        } else {
+            val visibleChars = if (integerPart.length <= 4) 1 else 2
+            integerPart.take(visibleChars) + integerPart.drop(visibleChars).map { if (it == ',') ',' else '*' }.joinToString("")
+        }
+        return "$prefix $maskedInteger.***"
     }
 
     Card(
@@ -1314,12 +1427,31 @@ fun MonthlyExpensesCard(
                     )
                 }
 
-                Text(
-                    text = formattedNet,
-                    color = Color.White,
-                    fontSize = 32.sp,
-                    fontWeight = FontWeight.Bold
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = if (isBalanceVisible) formattedNet else maskAmount(formattedNet),
+                        color = Color.White,
+                        fontSize = if (isBalanceVisible) 32.sp else 28.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    IconButton(
+                        onClick = onToggleVisibility,
+                        modifier = Modifier
+                            .size(36.dp)
+                            .background(Color.White.copy(alpha = 0.15f), CircleShape)
+                    ) {
+                        Icon(
+                            imageVector = if (isBalanceVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                            contentDescription = if (isBalanceVisible) "Hide amount" else "Reveal amount",
+                            tint = Color.White,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
 
                 // Sub-breakdown if split reimbursements exist
                 if (summary.totalReimbursements > 0) {
@@ -1328,12 +1460,12 @@ fun MonthlyExpensesCard(
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Text(
-                            text = "Gross: $formattedGross",
+                            text = "Gross: " + (if (isBalanceVisible) formattedGross else maskAmount(formattedGross)),
                             color = Color.White.copy(alpha = 0.8f),
                             fontSize = 11.sp
                         )
                         Text(
-                            text = "Reimbursed: -$formattedReimbursement",
+                            text = "Reimbursed: -" + (if (isBalanceVisible) formattedReimbursement else maskAmount(formattedReimbursement)),
                             color = Color(0xFF81C784),
                             fontSize = 11.sp,
                             fontWeight = FontWeight.SemiBold
@@ -1402,6 +1534,62 @@ fun PendingSettlementsBanner(
                 fontWeight = FontWeight.Bold,
                 fontSize = 15.sp,
                 color = MaterialTheme.colorScheme.onTertiaryContainer
+            )
+        }
+    }
+}
+
+@Composable
+fun PayablesBanner(
+    pendingCount: Int,
+    totalAmount: Double,
+    onClick: () -> Unit
+) {
+    val indianLocale = remember { Locale.Builder().setLanguage("en").setRegion("IN").build() }
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() },
+        colors = CardDefaults.cardColors(
+            containerColor = Color(0xFFFBE9E7)
+        ),
+        shape = RoundedCornerShape(14.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Default.AccountBox,
+                    contentDescription = null,
+                    tint = Color(0xFFD84315),
+                    modifier = Modifier.size(22.dp)
+                )
+                Spacer(modifier = Modifier.width(10.dp))
+                Column {
+                    Text(
+                        text = "$pendingCount Active Debt${if (pendingCount > 1) "s" else ""}",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.sp,
+                        color = Color(0xFFBF360C)
+                    )
+                    Text(
+                        text = "Owed by you to friends/creditors",
+                        fontSize = 11.sp,
+                        color = Color(0xFFD84315).copy(alpha = 0.9f)
+                    )
+                }
+            }
+            Text(
+                text = "₹${String.format(indianLocale, "%.2f", totalAmount)}",
+                fontWeight = FontWeight.Bold,
+                fontSize = 15.sp,
+                color = Color(0xFFBF360C)
             )
         }
     }
@@ -1983,6 +2171,246 @@ fun PendingSettlementsDialog(
     }
 }
 
+@Composable
+fun PayablesDialog(
+    payables: List<com.example.expensetracker.data.PayableEntity>,
+    onDismiss: () -> Unit,
+    onMarkSettled: (Long) -> Unit,
+    onDeletePayable: (Long) -> Unit,
+    onAddPayable: (String, Double, String) -> Unit
+) {
+    val indianLocale = remember { Locale.Builder().setLanguage("en").setRegion("IN").build() }
+    var showAddDialog by remember { mutableStateOf(false) }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = RoundedCornerShape(22.dp),
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 6.dp,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(520.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFFFFCCBC)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.AccountBox,
+                                contentDescription = null,
+                                tint = Color(0xFFD84315),
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column {
+                            Text(
+                                text = "Owed By Me (Payables)",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 17.sp
+                            )
+                            Text(
+                                text = "Track debts you owe to others",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.Default.Close, contentDescription = "Close")
+                    }
+                }
+
+                Button(
+                    onClick = { showAddDialog = true },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD84315))
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Add Debt Owed to Friend", fontSize = 13.sp)
+                }
+
+                if (payables.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(
+                                imageVector = Icons.Default.Check,
+                                contentDescription = null,
+                                tint = Color(0xFF43A047),
+                                modifier = Modifier.size(48.dp)
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "You're all clear! No debts owed.",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items(payables, key = { it.id }) { item ->
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(14.dp),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = Color(0xFFFBE9E7).copy(alpha = 0.7f)
+                                )
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(14.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = "Owe: ${item.creditorName}",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 14.sp,
+                                            color = Color(0xFFBF360C)
+                                        )
+                                        if (item.description.isNotBlank()) {
+                                            Text(
+                                                text = item.description,
+                                                fontSize = 12.sp,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                        Text(
+                                            text = "₹${String.format(indianLocale, "%.2f", item.amount)}",
+                                            fontSize = 15.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color(0xFFD84315)
+                                        )
+                                    }
+
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Button(
+                                            onClick = { onMarkSettled(item.id) },
+                                            shape = RoundedCornerShape(8.dp),
+                                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32))
+                                        ) {
+                                            Text("Paid", fontSize = 11.sp)
+                                        }
+                                        IconButton(onClick = { onDeletePayable(item.id) }) {
+                                            Icon(
+                                                imageVector = Icons.Default.Delete,
+                                                contentDescription = "Delete",
+                                                tint = MaterialTheme.colorScheme.outline,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (showAddDialog) {
+        AddPayableDialog(
+            onDismiss = { showAddDialog = false },
+            onAdd = { name, amt, desc ->
+                onAddPayable(name, amt, desc)
+                showAddDialog = false
+            }
+        )
+    }
+}
+
+@Composable
+fun AddPayableDialog(
+    onDismiss: () -> Unit,
+    onAdd: (String, Double, String) -> Unit
+) {
+    var creditorName by remember { mutableStateOf("") }
+    var amountText by remember { mutableStateOf("") }
+    var descriptionText by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Add Debt / Payable", fontWeight = FontWeight.Bold) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(
+                    value = creditorName,
+                    onValueChange = { creditorName = it },
+                    label = { Text("Creditor / Friend Name") },
+                    placeholder = { Text("e.g. Rahul, Landlord") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = amountText,
+                    onValueChange = { amountText = it },
+                    label = { Text("Amount (₹)") },
+                    placeholder = { Text("e.g. 500") },
+                    keyboardOptions = KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = descriptionText,
+                    onValueChange = { descriptionText = it },
+                    label = { Text("Description / Reason (Optional)") },
+                    placeholder = { Text("e.g. Dinner share, borrowed cash") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val amt = amountText.toDoubleOrNull() ?: 0.0
+                    if (creditorName.isNotBlank() && amt > 0.0) {
+                        onAdd(creditorName, amt, descriptionText)
+                    }
+                },
+                enabled = creditorName.isNotBlank() && (amountText.toDoubleOrNull() ?: 0.0) > 0.0
+            ) {
+                Text("Save Debt")
+            }
+        },
+        dismissButton = {
+            OutlinedButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CategoryRulesDialog(
@@ -2160,8 +2588,10 @@ fun ManualEntryDialog(
     accounts: List<Account>,
     categories: List<Category>,
     onDismiss: () -> Unit,
+    onSavePayable: (creditorName: String, amount: Double, description: String) -> Unit,
     onSave: (amount: Double, merchant: String, type: TransactionType, categoryId: Long, accountId: Long, isSplit: Boolean, reimbursementAmount: Double, peerName: String?, customCat: String?) -> Unit
 ) {
+    var entryMode by remember { mutableStateOf(0) } // 0 = Expense, 1 = Income, 2 = I Owe Someone (Payable)
     var amountText by remember { mutableStateOf("") }
     var merchantText by remember { mutableStateOf("") }
     var selectedType by remember { mutableStateOf(TransactionType.EXPENSE) }
@@ -2194,7 +2624,11 @@ fun ManualEntryDialog(
                     .padding(20.dp)
             ) {
                 Text(
-                    text = "Add Transaction",
+                    text = when (entryMode) {
+                        2 -> "Record Debt (Owed by Me)"
+                        1 -> "Add Income"
+                        else -> "Add Expense"
+                    },
                     fontWeight = FontWeight.Bold,
                     fontSize = 18.sp,
                     color = MaterialTheme.colorScheme.onSurface
@@ -2208,22 +2642,38 @@ fun ManualEntryDialog(
                         .verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    // Type Toggle
+                    // Type Toggle (Expense / Income / I Owe Someone)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         FilterChip(
-                            selected = selectedType == TransactionType.EXPENSE,
-                            onClick = { selectedType = TransactionType.EXPENSE },
-                            label = { Text("Expense") },
+                            selected = entryMode == 0,
+                            onClick = {
+                                entryMode = 0
+                                selectedType = TransactionType.EXPENSE
+                            },
+                            label = { Text("Expense", fontSize = 11.sp) },
                             modifier = Modifier.weight(1f)
                         )
                         FilterChip(
-                            selected = selectedType == TransactionType.INCOME,
-                            onClick = { selectedType = TransactionType.INCOME },
-                            label = { Text("Income") },
+                            selected = entryMode == 1,
+                            onClick = {
+                                entryMode = 1
+                                selectedType = TransactionType.INCOME
+                            },
+                            label = { Text("Income", fontSize = 11.sp) },
                             modifier = Modifier.weight(1f)
+                        )
+                        FilterChip(
+                            selected = entryMode == 2,
+                            onClick = { entryMode = 2 },
+                            label = { Text("I Owe", fontSize = 11.sp) },
+                            modifier = Modifier.weight(1f),
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = Color(0xFFFFCCBC),
+                                selectedLabelColor = Color(0xFFBF360C)
+                            )
                         )
                     }
 
@@ -2242,32 +2692,120 @@ fun ManualEntryDialog(
                         shape = RoundedCornerShape(12.dp)
                     )
 
-                    // Merchant
-                    OutlinedTextField(
-                        value = merchantText,
-                        onValueChange = {
-                            merchantText = it
-                            errorMessage = null
-                        },
-                        label = { Text(if (selectedType == TransactionType.EXPENSE) "Merchant / Spent on" else "Source / Income from") },
-                        placeholder = { Text("e.g. Starbucks, Groww, Freelance") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        shape = RoundedCornerShape(12.dp)
-                    )
+                    if (entryMode == 2) {
+                        // Payable / Debt fields
+                        OutlinedTextField(
+                            value = peerNameText,
+                            onValueChange = {
+                                peerNameText = it
+                                errorMessage = null
+                            },
+                            label = { Text("Creditor / Friend Name") },
+                            placeholder = { Text("e.g. Rahul, Landlord, Roommate") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            shape = RoundedCornerShape(12.dp)
+                        )
+                        OutlinedTextField(
+                            value = merchantText,
+                            onValueChange = { merchantText = it },
+                            label = { Text("Reason / Description (Optional)") },
+                            placeholder = { Text("e.g. Paid for dinner, borrowed money") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            shape = RoundedCornerShape(12.dp)
+                        )
+                    } else {
+                        // Regular Transaction fields
+                        OutlinedTextField(
+                            value = merchantText,
+                            onValueChange = {
+                                merchantText = it
+                                errorMessage = null
+                            },
+                            label = { Text(if (selectedType == TransactionType.EXPENSE) "Merchant / Spent on" else "Source / Income from") },
+                            placeholder = { Text("e.g. Starbucks, Groww, Freelance") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            shape = RoundedCornerShape(12.dp)
+                        )
 
-                    // Category Selector
-                    if (!isCustomCat) {
+                        // Category Selector
+                        if (!isCustomCat) {
+                            ExposedDropdownMenuBox(
+                                expanded = categoryDropdownExpanded,
+                                onExpandedChange = { categoryDropdownExpanded = !categoryDropdownExpanded }
+                            ) {
+                                OutlinedTextField(
+                                    value = currentCat?.name ?: "Category",
+                                    onValueChange = {},
+                                    readOnly = true,
+                                    label = { Text("Category") },
+                                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = categoryDropdownExpanded) },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable),
+                                    shape = RoundedCornerShape(12.dp)
+                                )
+
+                                ExposedDropdownMenu(
+                                    expanded = categoryDropdownExpanded,
+                                    onDismissRequest = { categoryDropdownExpanded = false }
+                                ) {
+                                    categories.forEach { category ->
+                                        DropdownMenuItem(
+                                            text = { Text(category.name) },
+                                            onClick = {
+                                                selectedCatId = category.id
+                                                isCustomCat = false
+                                                categoryDropdownExpanded = false
+                                            }
+                                        )
+                                    }
+                                    HorizontalDivider()
+                                    DropdownMenuItem(
+                                        text = {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Icon(Icons.Default.Add, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
+                                                Spacer(modifier = Modifier.width(6.dp))
+                                                Text("+ Add Custom Category...", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
+                                            }
+                                        },
+                                        onClick = {
+                                            isCustomCat = true
+                                            categoryDropdownExpanded = false
+                                        }
+                                    )
+                                }
+                            }
+                        } else {
+                            OutlinedTextField(
+                                value = customCatName,
+                                onValueChange = { customCatName = it },
+                                label = { Text("New Custom Category Name") },
+                                placeholder = { Text("e.g. Investment, KSFE, Pet Care") },
+                                singleLine = true,
+                                trailingIcon = {
+                                    IconButton(onClick = { isCustomCat = false }) {
+                                        Icon(Icons.Default.Close, contentDescription = "Cancel Custom Category")
+                                    }
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(12.dp)
+                            )
+                        }
+
+                        // Account Selector
                         ExposedDropdownMenuBox(
-                            expanded = categoryDropdownExpanded,
-                            onExpandedChange = { categoryDropdownExpanded = !categoryDropdownExpanded }
+                            expanded = accountDropdownExpanded,
+                            onExpandedChange = { accountDropdownExpanded = !accountDropdownExpanded }
                         ) {
                             OutlinedTextField(
-                                value = currentCat?.name ?: "Category",
+                                value = currentAcc?.let { it.nickname ?: it.name } ?: "Account",
                                 onValueChange = {},
                                 readOnly = true,
-                                label = { Text("Category") },
-                                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = categoryDropdownExpanded) },
+                                label = { Text("Account") },
+                                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = accountDropdownExpanded) },
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable),
@@ -2275,119 +2813,56 @@ fun ManualEntryDialog(
                             )
 
                             ExposedDropdownMenu(
-                                expanded = categoryDropdownExpanded,
-                                onDismissRequest = { categoryDropdownExpanded = false }
+                                expanded = accountDropdownExpanded,
+                                onDismissRequest = { accountDropdownExpanded = false }
                             ) {
-                                categories.forEach { category ->
+                                accounts.forEach { account ->
                                     DropdownMenuItem(
-                                        text = { Text(category.name) },
+                                        text = { Text(account.nickname ?: account.name) },
                                         onClick = {
-                                            selectedCatId = category.id
-                                            isCustomCat = false
-                                            categoryDropdownExpanded = false
+                                            selectedAccId = account.id
+                                            accountDropdownExpanded = false
                                         }
                                     )
                                 }
-                                HorizontalDivider()
-                                DropdownMenuItem(
-                                    text = {
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
-                                            Icon(Icons.Default.Add, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
-                                            Spacer(modifier = Modifier.width(6.dp))
-                                            Text("+ Add Custom Category...", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
-                                        }
-                                    },
-                                    onClick = {
-                                        isCustomCat = true
-                                        categoryDropdownExpanded = false
-                                    }
-                                )
                             }
                         }
-                    } else {
-                        OutlinedTextField(
-                            value = customCatName,
-                            onValueChange = { customCatName = it },
-                            label = { Text("New Custom Category Name") },
-                            placeholder = { Text("e.g. Investment, KSFE, Pet Care") },
-                            singleLine = true,
-                            trailingIcon = {
-                                IconButton(onClick = { isCustomCat = false }) {
-                                    Icon(Icons.Default.Close, contentDescription = "Cancel Custom Category")
-                                }
-                            },
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(12.dp)
-                        )
-                    }
 
-                    // Account Selector
-                    ExposedDropdownMenuBox(
-                        expanded = accountDropdownExpanded,
-                        onExpandedChange = { accountDropdownExpanded = !accountDropdownExpanded }
-                    ) {
-                        OutlinedTextField(
-                            value = currentAcc?.let { it.nickname ?: it.name } ?: "Account",
-                            onValueChange = {},
-                            readOnly = true,
-                            label = { Text("Account") },
-                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = accountDropdownExpanded) },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable),
-                            shape = RoundedCornerShape(12.dp)
-                        )
-
-                        ExposedDropdownMenu(
-                            expanded = accountDropdownExpanded,
-                            onDismissRequest = { accountDropdownExpanded = false }
-                        ) {
-                            accounts.forEach { account ->
-                                DropdownMenuItem(
-                                    text = { Text(account.nickname ?: account.name) },
-                                    onClick = {
-                                        selectedAccId = account.id
-                                        accountDropdownExpanded = false
-                                    }
-                                )
-                            }
-                        }
-                    }
-
-                    // Split Expense / Reimbursement Toggle (Only for expenses)
-                    if (selectedType == TransactionType.EXPENSE) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text("Split expense (Reimbursement)", fontSize = 13.sp, fontWeight = FontWeight.Medium)
-                            Switch(
-                                checked = isSplitEnabled,
-                                onCheckedChange = { isSplitEnabled = it }
-                            )
-                        }
-
-                        if (isSplitEnabled) {
+                        // Split Expense / Reimbursement Toggle (Only for expenses)
+                        if (selectedType == TransactionType.EXPENSE) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                OutlinedTextField(
-                                    value = peerNameText,
-                                    onValueChange = { peerNameText = it },
-                                    label = { Text("Friend Name") },
-                                    modifier = Modifier.weight(1f),
-                                    shape = RoundedCornerShape(10.dp)
+                                Text("Split expense (Reimbursement)", fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                                Switch(
+                                    checked = isSplitEnabled,
+                                    onCheckedChange = { isSplitEnabled = it }
                                 )
-                                OutlinedTextField(
-                                    value = reimbursementText,
-                                    onValueChange = { reimbursementText = it },
-                                    label = { Text("Owed (₹)") },
-                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                                    modifier = Modifier.weight(1f),
-                                    shape = RoundedCornerShape(10.dp)
-                                )
+                            }
+
+                            if (isSplitEnabled) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    OutlinedTextField(
+                                        value = peerNameText,
+                                        onValueChange = { peerNameText = it },
+                                        label = { Text("Friend Name") },
+                                        modifier = Modifier.weight(1f),
+                                        shape = RoundedCornerShape(10.dp)
+                                    )
+                                    OutlinedTextField(
+                                        value = reimbursementText,
+                                        onValueChange = { reimbursementText = it },
+                                        label = { Text("Owed (₹)") },
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                        modifier = Modifier.weight(1f),
+                                        shape = RoundedCornerShape(10.dp)
+                                    )
+                                }
                             }
                         }
                     }
@@ -2420,6 +2895,13 @@ fun ManualEntryDialog(
                                 errorMessage = "Please enter a valid amount greater than 0"
                                 return@Button
                             }
+
+                            if (entryMode == 2) {
+                                val creditor = peerNameText.trim().ifEmpty { "Friend" }
+                                onSavePayable(creditor, amountVal, merchantText.trim())
+                                return@Button
+                            }
+
                             val merchantVal = merchantText.trim().ifEmpty {
                                 if (selectedType == TransactionType.EXPENSE) "Manual Expense" else "Manual Income"
                             }

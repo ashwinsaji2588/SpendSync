@@ -19,10 +19,9 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.Send
-import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.*
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -144,20 +143,15 @@ fun AiInsightsDialog(
                                 fontSize = 17.sp
                             )
                             Text(
-                                text = if (currentApiKey.isNotBlank()) "Gemini 1.5 Flash Active" else "API Key Required",
+                                text = "Powered by Gemini 1.5 Flash",
                                 fontSize = 11.sp,
-                                color = if (currentApiKey.isNotBlank()) Color(0xFF43A047) else MaterialTheme.colorScheme.error
+                                color = MaterialTheme.colorScheme.primary
                             )
                         }
                     }
 
-                    Row {
-                        IconButton(onClick = { showApiKeyConfigDialog = true }) {
-                            Icon(Icons.Default.Edit, contentDescription = "Configure API Key", tint = MaterialTheme.colorScheme.primary)
-                        }
-                        IconButton(onClick = onDismiss) {
-                            Icon(Icons.Default.Close, contentDescription = "Close")
-                        }
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.Default.Close, contentDescription = "Close")
                     }
                 }
 
@@ -264,7 +258,7 @@ fun AiInsightsDialog(
                             .background(MaterialTheme.colorScheme.primary)
                     ) {
                         Icon(
-                            imageVector = Icons.Default.Send,
+                            imageVector = androidx.compose.material.icons.Icons.AutoMirrored.Filled.Send,
                             contentDescription = "Send",
                             tint = MaterialTheme.colorScheme.onPrimary,
                             modifier = Modifier.size(18.dp)
@@ -357,6 +351,7 @@ fun GeminiApiKeyDialog(
                     label = { Text("Gemini API Key") },
                     placeholder = { Text("AIzaSy...") },
                     singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp)
                 )

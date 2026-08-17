@@ -85,33 +85,52 @@ fun AdvancedAnalyticsSection(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "Spending Analytics",
-                    fontSize = 16.sp,
+                    text = "Analytics",
+                    fontSize = 15.sp,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurface
                 )
 
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    FilterChip(
-                        selected = selectedChartTab == 0,
-                        onClick = { selectedChartTab = 0 },
-                        label = { Text("Daily Burn", fontSize = 11.sp) },
-                        shape = RoundedCornerShape(12.dp),
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
-                            selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
-                        )
-                    )
-                    FilterChip(
-                        selected = selectedChartTab == 1,
-                        onClick = { selectedChartTab = 1 },
-                        label = { Text("MoM Trend", fontSize = 11.sp) },
-                        shape = RoundedCornerShape(12.dp),
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
-                            selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
-                        )
-                    )
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(3.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(9.dp),
+                            color = if (selectedChartTab == 0) MaterialTheme.colorScheme.primary else Color.Transparent,
+                            modifier = Modifier.clickable { selectedChartTab = 0 }
+                        ) {
+                            Text(
+                                text = "Daily Burn",
+                                fontSize = 11.sp,
+                                fontWeight = if (selectedChartTab == 0) FontWeight.Bold else FontWeight.Medium,
+                                color = if (selectedChartTab == 0) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                maxLines = 1,
+                                softWrap = false
+                            )
+                        }
+
+                        Surface(
+                            shape = RoundedCornerShape(9.dp),
+                            color = if (selectedChartTab == 1) MaterialTheme.colorScheme.primary else Color.Transparent,
+                            modifier = Modifier.clickable { selectedChartTab = 1 }
+                        ) {
+                            Text(
+                                text = "MoM Trend",
+                                fontSize = 11.sp,
+                                fontWeight = if (selectedChartTab == 1) FontWeight.Bold else FontWeight.Medium,
+                                color = if (selectedChartTab == 1) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                maxLines = 1,
+                                softWrap = false
+                            )
+                        }
+                    }
                 }
             }
 

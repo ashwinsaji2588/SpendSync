@@ -14,9 +14,10 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         Category::class,
         CategoryRule::class,
         TransactionEntity::class,
-        Budget::class
+        Budget::class,
+        PayableEntity::class
     ],
-    version = 4,
+    version = 5,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -27,10 +28,28 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun categoryRuleDao(): CategoryRuleDao
     abstract fun transactionDao(): TransactionDao
     abstract fun budgetDao(): BudgetDao
+    abstract fun payableDao(): PayableDao
 
     companion object {
         @Volatile
         private var INSTANCE: AppDatabase? = null
+
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `payables` (
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `creditorName` TEXT NOT NULL,
+                        `amount` REAL NOT NULL,
+                        `description` TEXT NOT NULL DEFAULT '',
+                        `timestamp` INTEGER NOT NULL,
+                        `isSettled` INTEGER NOT NULL DEFAULT 0
+                    )
+                    """.trimIndent()
+                )
+            }
+        }
 
         val MIGRATION_1_2 = object : Migration(1, 2) {
             override fun migrate(db: SupportSQLiteDatabase) {
@@ -188,7 +207,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "expense_tracker_database"
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                     .fallbackToDestructiveMigration(true)
                     .addCallback(object : Callback() {
                         override fun onCreate(db: SupportSQLiteDatabase) {
@@ -238,6 +257,18 @@ abstract class AppDatabase : RoomDatabase() {
                         Account(id = 3, name = "Credit Card", type = AccountType.CREDIT_CARD)
                     )
                     accountDao.insertAccounts(accounts)
+                } else {
+                    // Reclassify existing misclassified card accounts
+                    val allAccounts = accountDao.getAllAccountsDirect()
+                    for (acc in allAccounts) {
+                        val lowerName = acc.name.lowercase(java.util.Locale.ROOT)
+                        if (acc.type == AccountType.BANK_ACCOUNT) {
+                            if (lowerName.contains("credit card") || lowerName.contains("card") || lowerName.contains(" cc")) {
+                                val newType = if (lowerName.contains("debit")) AccountType.DEBIT_CARD else AccountType.CREDIT_CARD
+                                accountDao.updateAccountTypeAndName(acc.id, newType, acc.name)
+                            }
+                        }
+                    }
                 }
             }
         }

@@ -68,6 +68,9 @@ interface TransactionDao {
     @Query("DELETE FROM transactions WHERE id = :transactionId")
     suspend fun deleteTransaction(transactionId: Long)
 
+    @Query("UPDATE transactions SET categoryId = :targetCategoryId WHERE LOWER(merchantName) LIKE '%' || LOWER(:keyword) || '%'")
+    suspend fun updateCategoryForMatchingMerchants(keyword: String, targetCategoryId: Long): Int
+
     @Query("DELETE FROM transactions")
     suspend fun clearAll()
 }

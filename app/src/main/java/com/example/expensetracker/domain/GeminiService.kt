@@ -6,6 +6,7 @@ import com.google.ai.client.generativeai.GenerativeModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
+import java.util.Locale
 
 data class AiParsedTransaction(
     val merchantName: String,
@@ -28,11 +29,11 @@ class GeminiService(private val context: Context) {
         prefs.edit().putString(PREF_GEMINI_API_KEY, apiKey.trim()).apply()
     }
 
-    private fun getModel(): GenerativeModel? {
+    private fun getModel(modelName: String = "gemini-1.5-flash-latest"): GenerativeModel? {
         val apiKey = getApiKey()
         if (apiKey.isBlank()) return null
         return GenerativeModel(
-            modelName = "gemini-1.5-flash",
+            modelName = modelName,
             apiKey = apiKey
         )
     }
@@ -41,7 +42,8 @@ class GeminiService(private val context: Context) {
      * AI-Powered Fallback SMS Parser when regex/keyword categorization needs deeper understanding.
      */
     suspend fun parseSmsWithAi(smsText: String): AiParsedTransaction? = withContext(Dispatchers.IO) {
-        val model = getModel() ?: return@withContext null
+        val apiKey = getApiKey()
+        if (apiKey.isBlank()) return@withContext null
 
         val prompt = """
             Analyze the following Indian Bank SMS and extract transaction details.
@@ -56,67 +58,82 @@ class GeminiService(private val context: Context) {
             SMS: "$smsText"
         """.trimIndent()
 
-        try {
-            val response = model.generateContent(prompt)
-            val text = response.text?.trim() ?: return@withContext null
-            val cleanJson = text.removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
+        val modelsToTry = listOf("gemini-1.5-flash-latest", "gemini-1.5-flash", "gemini-2.0-flash")
+        for (modelName in modelsToTry) {
+            try {
+                val model = GenerativeModel(modelName = modelName, apiKey = apiKey)
+                val response = model.generateContent(prompt)
+                val rawText = response.text?.trim() ?: continue
+                val cleanJson = rawText
+                    .removePrefix("```json")
+                    .removePrefix("```")
+                    .removeSuffix("```")
+                    .trim()
 
-            val json = JSONObject(cleanJson)
-            val merchant = json.optString("merchantName", "Unknown Merchant")
-            val amount = json.optDouble("amount", 0.0)
-            val typeStr = json.optString("transactionType", "EXPENSE")
-            val category = json.optString("category", "General")
+                val json = JSONObject(cleanJson)
+                val merchant = json.optString("merchantName", "Unknown")
+                val amount = json.optDouble("amount", 0.0)
+                val typeStr = json.optString("transactionType", "EXPENSE")
+                val category = json.optString("category", "General")
 
-            val type = when (typeStr.uppercase()) {
-                "INCOME", "CREDIT" -> TransactionType.INCOME
-                "TRANSFER" -> TransactionType.TRANSFER
-                else -> TransactionType.EXPENSE
+                val type = when (typeStr.uppercase(Locale.ROOT)) {
+                    "INCOME" -> TransactionType.INCOME
+                    "TRANSFER" -> TransactionType.TRANSFER
+                    else -> TransactionType.EXPENSE
+                }
+
+                if (amount > 0.0) {
+                    return@withContext AiParsedTransaction(
+                        merchantName = merchant,
+                        amount = amount,
+                        transactionType = type,
+                        category = category
+                    )
+                }
+            } catch (e: Exception) {
+                // Try next fallback model
             }
-
-            if (amount > 0) {
-                AiParsedTransaction(
-                    merchantName = merchant,
-                    amount = amount,
-                    transactionType = type,
-                    category = category
-                )
-            } else {
-                null
-            }
-        } catch (e: Exception) {
-            null
         }
+        null
     }
 
     /**
      * Financial Chat Assistant answering user questions using aggregated spending data.
      */
-    suspend fun answerFinancialQuery(
-        financialSummaryContext: String,
-        userQuery: String
-    ): String = withContext(Dispatchers.IO) {
-        val model = getModel()
-            ?: return@withContext "Please configure your free Gemini API Key in AI Insights Settings to enable smart financial assistance."
+    suspend fun answerFinancialQuery(userQuery: String, financialContext: String): String = withContext(Dispatchers.IO) {
+        val apiKey = getApiKey()
+        if (apiKey.isBlank()) {
+            return@withContext "Google Gemini API Key is not configured. Please ensure GEMINI_API_KEY is provided."
+        }
 
         val prompt = """
-            You are SpendSync AI, a smart, insightful, and friendly personal finance assistant.
-            The user is asking questions about their financial habits, budgets, and expenses.
+            You are SpendSync's AI Financial Advisor for an Indian user.
+            All monetary amounts are in Indian Rupees (₹).
             
-            Financial Context for the current period:
-            $financialSummaryContext
-
+            Current User Financial Context:
+            $financialContext
+            
             User Question:
-            "$userQuery"
-
-            Provide a concise, helpful, and friendly response with clear actionable tips. Format amounts in Indian Rupees (₹).
+            $userQuery
+            
+            Provide a helpful, actionable, concise, and friendly answer. Keep bullet points crisp.
         """.trimIndent()
 
-        try {
-            val response = model.generateContent(prompt)
-            response.text?.trim() ?: "I couldn't analyze that right now. Please try again."
-        } catch (e: Exception) {
-            "Error querying Gemini: ${e.localizedMessage ?: "Please check your network and API Key."}"
+        val modelsToTry = listOf("gemini-1.5-flash-latest", "gemini-1.5-flash", "gemini-2.0-flash")
+        var lastError: String? = null
+        for (modelName in modelsToTry) {
+            try {
+                val model = GenerativeModel(modelName = modelName, apiKey = apiKey)
+                val response = model.generateContent(prompt)
+                val text = response.text?.trim()
+                if (!text.isNullOrBlank()) {
+                    return@withContext text
+                }
+            } catch (e: Exception) {
+                lastError = e.localizedMessage
+            }
         }
+        "I was unable to analyze your financial query right now: ${lastError ?: "Please verify network connection"}"
     }
 
     companion object {

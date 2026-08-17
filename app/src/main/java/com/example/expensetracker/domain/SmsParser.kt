@@ -15,7 +15,15 @@ data class RawSmsTransaction(
     val merchantName: String,
     val timestamp: Long,
     val transactionType: TransactionType,
-    val accountIdentifier: String?
+    val accountIdentifier: String?,
+    val detectedAccountType: AccountType = AccountType.BANK_ACCOUNT,
+    val detectedBankName: String? = null
+)
+
+data class DetectedAccountInfo(
+    val last4: String?,
+    val accountType: AccountType,
+    val bankName: String?
 )
 
 class SmsParserEngine(
@@ -38,9 +46,6 @@ class SmsParserEngine(
         "SIBSTM", "CSBLTD", "DLBSMS", "KVBANK", "TMBANK"
     )
 
-    // Regex to extract account identifier (last 4 digits)
-    private val accountRegex = Regex("""(?:A/c|account|card|acct|ending)\s*(?:no\.?|num\.?)?\s*\*+([0-9]{4})|(?:A/c|account|card|acct|ending)\s*(?:no\.?|num\.?)?\s*([0-9]{4})|X+([0-9]{4})|\*+([0-9]{4})""", RegexOption.IGNORE_CASE)
-
     fun isBankSender(sender: String): Boolean {
         if (sender.isBlank()) return false
         val upperSender = sender.uppercase(Locale.ROOT)
@@ -51,6 +56,114 @@ class SmsParserEngine(
                upperSender.contains("PAYTM") ||
                upperSender.contains("GPAY") ||
                upperSender.contains("CRED")
+    }
+
+    fun extractBankName(senderId: String, smsBody: String): String? {
+        val upper = "${senderId.uppercase(Locale.ROOT)} ${smsBody.uppercase(Locale.ROOT)}"
+        return when {
+            upper.contains("HDFC") -> "HDFC Bank"
+            upper.contains("AXIS") -> "Axis Bank"
+            upper.contains("ICICI") -> "ICICI Bank"
+            upper.contains("SBI") || upper.contains("SBIN") -> "SBI"
+            upper.contains("KOTAK") -> "Kotak Bank"
+            upper.contains("PNB") || upper.contains("PUNJAB") -> "PNB"
+            upper.contains("BOI") || upper.contains("BANK OF INDIA") -> "Bank of India"
+            upper.contains("CANARA") || upper.contains("CANBNK") -> "Canara Bank"
+            upper.contains("YES") || upper.contains("YESBK") -> "Yes Bank"
+            upper.contains("IDFC") -> "IDFC FIRST Bank"
+            upper.contains("INDUS") || upper.contains("INDUSB") -> "IndusInd Bank"
+            upper.contains("UNION") || upper.contains("UNIONB") -> "Union Bank"
+            upper.contains("PAYTM") -> "Paytm Bank"
+            upper.contains("RBL") -> "RBL Bank"
+            upper.contains("FEDERAL") || upper.contains("FEDBNK") -> "Federal Bank"
+            upper.contains("CITI") -> "Citi"
+            upper.contains("HSBC") -> "HSBC"
+            upper.contains("AU") && (upper.contains("AUBNK") || upper.contains("AU BANK") || upper.contains("AU SMALL")) -> "AU Small Finance Bank"
+            upper.contains("BANDHAN") -> "Bandhan Bank"
+            upper.contains("BARODA") || upper.contains("BOB") || upper.contains("BARB0") -> "Bank of Baroda"
+            upper.contains("STANDARD CHARTERED") || upper.contains("SCISMS") || upper.contains("STANCHAR") -> "Standard Chartered"
+            upper.contains("SOUTH INDIAN") || upper.contains("SIBSTM") -> "South Indian Bank"
+            else -> null
+        }
+    }
+
+    fun detectAccountTypeAndDetails(smsBody: String, senderId: String): DetectedAccountInfo {
+        val lowerBody = smsBody.lowercase(Locale.ROOT)
+        val bankName = extractBankName(senderId, smsBody)
+
+        // Specific regex patterns for cards:
+        // "Axis Bank Card no. XX3102", "HDFC Bank Card 7009", "Credit Card ending in 1234", "Card *1234"
+        val cardRegex = Regex("""(?:credit\s*card|debit\s*card|card\s*no\.?|card\s*num\.?|card|cc)\s*(?:no\.?|num\.?)?\s*(?:ending\s*(?:in|with)?\s*)?(?:[xX]+|\*+)?([0-9]{4})""", RegexOption.IGNORE_CASE)
+
+        // Specific regex patterns for bank accounts:
+        // "HDFC Bank A/c XX2452", "A/C *1234", "Account ending in 4321", "acct 1234"
+        val accountRegex = Regex("""(?:a/c|account|acct|savings\s*a/c|current\s*a/c)\s*(?:no\.?|num\.?)?\s*(?:ending\s*(?:in|with)?\s*)?(?:[xX]+|\*+)?([0-9]{4})""", RegexOption.IGNORE_CASE)
+
+        // Generic fallback digit extractor
+        val genericDigitRegex = Regex("""(?:[xX]{2,}|\*{2,})([0-9]{4})""")
+
+        val isCreditCardKeywords = lowerBody.contains("credit card") ||
+                lowerBody.contains("creditcard") ||
+                lowerBody.contains("card no") ||
+                lowerBody.contains("card ending") ||
+                lowerBody.contains("card num") ||
+                lowerBody.contains("cc ending") ||
+                lowerBody.contains("cc no") ||
+                lowerBody.contains(" cc ") ||
+                lowerBody.contains(" cc:") ||
+                Regex("""\b(?:axis|hdfc|icici|sbi|kotak|rbl|citi|sc|idfc)\s+bank\s+card\b""", RegexOption.IGNORE_CASE).containsMatchIn(smsBody) ||
+                Regex("""\bcard\s+(?:no\.?\s*)?(?:xx+|\*+)?[0-9]{4}\b""", RegexOption.IGNORE_CASE).containsMatchIn(smsBody)
+
+        val isDebitCardKeywords = lowerBody.contains("debit card") ||
+                lowerBody.contains("debitcard") ||
+                lowerBody.contains(" dc ") ||
+                lowerBody.contains("dc ending")
+
+        val isExplicitBankAccountKeywords = lowerBody.contains("a/c") ||
+                lowerBody.contains("account") ||
+                lowerBody.contains("acct")
+
+        // Determine account type
+        val detectedType = when {
+            isDebitCardKeywords -> AccountType.DEBIT_CARD
+            isCreditCardKeywords -> AccountType.CREDIT_CARD
+            isExplicitBankAccountKeywords -> AccountType.BANK_ACCOUNT
+            else -> AccountType.BANK_ACCOUNT
+        }
+
+        // Determine last 4 digits
+        val cardMatch = cardRegex.find(smsBody)
+        val acctMatch = accountRegex.find(smsBody)
+        val genericMatch = genericDigitRegex.find(smsBody)
+
+        val last4 = when {
+            detectedType == AccountType.CREDIT_CARD || detectedType == AccountType.DEBIT_CARD ->
+                cardMatch?.groupValues?.get(1) ?: acctMatch?.groupValues?.get(1) ?: genericMatch?.groupValues?.get(1)
+            else ->
+                acctMatch?.groupValues?.get(1) ?: cardMatch?.groupValues?.get(1) ?: genericMatch?.groupValues?.get(1)
+        }
+
+        return DetectedAccountInfo(
+            last4 = last4,
+            accountType = detectedType,
+            bankName = bankName
+        )
+    }
+
+    fun buildAccountName(bankName: String?, type: AccountType, last4: String): String {
+        val bName = bankName ?: ""
+        val typeLabel = when (type) {
+            AccountType.CREDIT_CARD -> "Credit Card"
+            AccountType.DEBIT_CARD -> "Debit Card"
+            AccountType.BANK_ACCOUNT -> "A/c"
+            AccountType.WALLET -> "Wallet"
+            AccountType.CASH -> "Cash"
+        }
+        return if (bName.isNotBlank()) {
+            "$bName $typeLabel *$last4"
+        } else {
+            "$typeLabel *$last4"
+        }
     }
 
     /**
@@ -80,16 +193,17 @@ class SmsParserEngine(
             if (senderId.isNotBlank()) senderId else "Unknown Merchant"
         }
 
-        // Extract account identifier (last 4 digits)
-        val accountMatch = accountRegex.find(smsBody)
-        val last4Digits = accountMatch?.groupValues?.drop(1)?.firstOrNull { !it.isNullOrBlank() }
+        // Extract account details & accurate type
+        val accountInfo = detectAccountTypeAndDetails(smsBody, senderId)
 
         return RawSmsTransaction(
             amount = amount,
             merchantName = merchantName,
             timestamp = timestamp,
             transactionType = transactionType,
-            accountIdentifier = last4Digits
+            accountIdentifier = accountInfo.last4,
+            detectedAccountType = accountInfo.accountType,
+            detectedBankName = accountInfo.bankName
         )
     }
 
@@ -125,13 +239,23 @@ class SmsParserEngine(
             existingCategory?.id ?: categoryDao.insertCategory(Category(name = finalCategoryName))
         }
 
-        // Resolve Account
+        // Resolve Account with accurate AccountType & upsert classification update
         val accountId: Long = if (raw.accountIdentifier != null) {
             val existingAcc = accountDao.getAccountByLast4(raw.accountIdentifier)
-            existingAcc?.id ?: run {
+            if (existingAcc != null) {
+                // If existing account was misclassified as BANK_ACCOUNT but is actually a card, update it
+                if (existingAcc.type == AccountType.BANK_ACCOUNT &&
+                    (raw.detectedAccountType == AccountType.CREDIT_CARD || raw.detectedAccountType == AccountType.DEBIT_CARD)
+                ) {
+                    val updatedName = buildAccountName(raw.detectedBankName, raw.detectedAccountType, raw.accountIdentifier)
+                    accountDao.updateAccountTypeAndName(existingAcc.id, raw.detectedAccountType, updatedName)
+                }
+                existingAcc.id
+            } else {
+                val newName = buildAccountName(raw.detectedBankName, raw.detectedAccountType, raw.accountIdentifier)
                 val newAcc = Account(
-                    name = "Bank A/c *${raw.accountIdentifier}",
-                    type = AccountType.BANK_ACCOUNT,
+                    name = newName,
+                    type = raw.detectedAccountType,
                     accountNumberLast4 = raw.accountIdentifier
                 )
                 accountDao.insertAccount(newAcc)

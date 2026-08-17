@@ -41,6 +41,9 @@ interface AccountDao {
     @Query("UPDATE accounts SET nickname = :nickname WHERE id = :accountId")
     suspend fun updateAccountNickname(accountId: Long, nickname: String?)
 
+    @Query("UPDATE accounts SET type = :type, name = :name WHERE id = :accountId")
+    suspend fun updateAccountTypeAndName(accountId: Long, type: AccountType, name: String)
+
     @Query("""
         UPDATE accounts 
         SET name = :name, type = :type, nickname = :nickname, accountNumberLast4 = :last4 
