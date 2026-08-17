@@ -91,8 +91,8 @@ class HistoricalSmsScanner(
                                         val catId = cat?.id ?: categoryDao.insertCategory(
                                             com.example.expensetracker.data.Category(name = aiResult.category, colorHex = "#7E57C2")
                                         )
-                                        val accId = accountDao.getAccountByName("Primary Bank Account")?.id
-                                            ?: (accountDao.getAllAccountsDirect().firstOrNull()?.id ?: 1L)
+                                        val accId = accountDao.getAllAccountsDirect().firstOrNull()?.id
+                                            ?: accountDao.insertAccount(com.example.expensetracker.data.Account(name = "Bank Account", type = com.example.expensetracker.data.AccountType.BANK_ACCOUNT))
 
                                         transaction = TransactionEntity(
                                             amount = aiResult.amount,

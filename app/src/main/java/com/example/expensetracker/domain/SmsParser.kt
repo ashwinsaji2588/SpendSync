@@ -261,9 +261,11 @@ class SmsParserEngine(
                 accountDao.insertAccount(newAcc)
             }
         } else {
-            // Default to first account or Primary Bank Account
-            val defaultAcc = accountDao.getAccountByName("Primary Bank Account")
-            defaultAcc?.id ?: accountDao.getDefaultAccountId() ?: 1L
+            val firstAcc = accountDao.getAllAccountsDirect().firstOrNull()
+            firstAcc?.id ?: run {
+                val newName = if (!raw.detectedBankName.isNullOrBlank()) "${raw.detectedBankName} Account" else "Main Account"
+                accountDao.insertAccount(Account(name = newName, type = raw.detectedAccountType))
+            }
         }
 
         return TransactionEntity(

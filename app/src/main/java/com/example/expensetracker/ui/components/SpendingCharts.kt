@@ -288,15 +288,25 @@ fun MonthOverMonthComparisonChart(
         computeCumulativeDays(previousMonthTransactions)
     }
 
-    val maxSpend = remember(currentCumulative, prevCumulative) {
+    val rawMax = remember(currentCumulative, prevCumulative) {
         val cMax = currentCumulative.maxOfOrNull { it.second } ?: 0.0
         val pMax = prevCumulative.maxOfOrNull { it.second } ?: 0.0
         maxOf(cMax, pMax, 500.0)
     }
 
+    val maxSpend = remember(rawMax) { calculateNiceMax(rawMax) }
+
     val currentTotal = currentCumulative.lastOrNull()?.second ?: 0.0
     val prevTotal = prevCumulative.lastOrNull()?.second ?: 0.0
     val diff = currentTotal - prevTotal
+
+    fun formatCurrencyScale(amount: Double): String {
+        return when {
+            amount >= 100000 -> "₹${String.format(indianLocale, "%.1fL", amount / 100000.0)}"
+            amount >= 1000 -> "₹${String.format(indianLocale, "%.0fk", amount / 1000.0)}"
+            else -> "₹${String.format(indianLocale, "%.0f", amount)}"
+        }
+    }
 
     Column(modifier = Modifier.fillMaxWidth()) {
         Row(
@@ -325,60 +335,177 @@ fun MonthOverMonthComparisonChart(
             )
         }
 
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(10.dp))
 
-        // Line canvas
-        Canvas(
+        // Chart Area with Y-Axis Scale and X-Axis Days
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(130.dp)
+                .height(150.dp)
         ) {
-            val width = size.width
-            val height = size.height
-            val days = 31
-
-            // Draw grid line at 50% and 100%
-            drawLine(
-                color = Color.LightGray.copy(alpha = 0.2f),
-                start = Offset(0f, height * 0.5f),
-                end = Offset(width, height * 0.5f),
-                strokeWidth = 1.dp.toPx()
-            )
-
-            // Draw previous month line
-            val prevPath = Path()
-            if (prevCumulative.isNotEmpty()) {
-                prevCumulative.forEachIndexed { index, (day, cumAmount) ->
-                    val x = (day.toFloat() / days.toFloat()) * width
-                    val y = height - ((cumAmount.toFloat() / maxSpend.toFloat()) * height)
-                    if (index == 0) prevPath.moveTo(x, y) else prevPath.lineTo(x, y)
-                }
-                drawPath(
-                    path = prevPath,
-                    color = Color(0xFF78909C),
-                    style = Stroke(
-                        width = 2.dp.toPx(),
-                        pathEffect = PathEffect.dashPathEffect(floatArrayOf(10f, 10f), 0f)
-                    )
+            // Y-Axis Scale Column
+            Column(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .padding(end = 6.dp),
+                verticalArrangement = Arrangement.SpaceBetween,
+                horizontalAlignment = Alignment.End
+            ) {
+                Text(
+                    text = formatCurrencyScale(maxSpend),
+                    fontSize = 9.sp,
+                    color = MaterialTheme.colorScheme.outline,
+                    fontWeight = FontWeight.Medium
+                )
+                Text(
+                    text = formatCurrencyScale(maxSpend / 2),
+                    fontSize = 9.sp,
+                    color = MaterialTheme.colorScheme.outline,
+                    fontWeight = FontWeight.Medium
+                )
+                Text(
+                    text = "₹0",
+                    fontSize = 9.sp,
+                    color = MaterialTheme.colorScheme.outline,
+                    fontWeight = FontWeight.Medium
                 )
             }
 
-            // Draw current month line
-            val currPath = Path()
-            if (currentCumulative.isNotEmpty()) {
-                currentCumulative.forEachIndexed { index, (day, cumAmount) ->
-                    val x = (day.toFloat() / days.toFloat()) * width
-                    val y = height - ((cumAmount.toFloat() / maxSpend.toFloat()) * height)
-                    if (index == 0) currPath.moveTo(x, y) else currPath.lineTo(x, y)
+            // Canvas for Lines & Grid
+            Column(modifier = Modifier.weight(1f).fillMaxHeight()) {
+                Canvas(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                ) {
+                    val width = size.width
+                    val height = size.height
+                    val days = 31
+
+                    // Top, Middle, and Baseline Grid lines
+                    drawLine(
+                        color = Color.LightGray.copy(alpha = 0.25f),
+                        start = Offset(0f, 0f),
+                        end = Offset(width, 0f),
+                        strokeWidth = 1.dp.toPx()
+                    )
+                    drawLine(
+                        color = Color.LightGray.copy(alpha = 0.25f),
+                        start = Offset(0f, height * 0.5f),
+                        end = Offset(width, height * 0.5f),
+                        strokeWidth = 1.dp.toPx()
+                    )
+                    drawLine(
+                        color = Color.LightGray.copy(alpha = 0.35f),
+                        start = Offset(0f, height),
+                        end = Offset(width, height),
+                        strokeWidth = 1.dp.toPx()
+                    )
+
+                    // Draw previous month dashed line
+                    val prevPath = Path()
+                    if (prevCumulative.isNotEmpty()) {
+                        prevCumulative.forEachIndexed { index, (day, cumAmount) ->
+                            val x = ((day - 1).toFloat() / (days - 1).toFloat()) * width
+                            val y = height - ((cumAmount.toFloat() / maxSpend.toFloat()).coerceIn(0f, 1f) * height)
+                            if (index == 0) prevPath.moveTo(x, y) else prevPath.lineTo(x, y)
+                        }
+                        drawPath(
+                            path = prevPath,
+                            color = Color(0xFF78909C),
+                            style = Stroke(
+                                width = 2.dp.toPx(),
+                                pathEffect = PathEffect.dashPathEffect(floatArrayOf(10f, 10f), 0f)
+                            )
+                        )
+                    }
+
+                    // Draw current month line + gradient fill underneath
+                    val currPath = Path()
+                    val fillPath = Path()
+                    if (currentCumulative.isNotEmpty()) {
+                        currentCumulative.forEachIndexed { index, (day, cumAmount) ->
+                            val x = ((day - 1).toFloat() / (days - 1).toFloat()) * width
+                            val y = height - ((cumAmount.toFloat() / maxSpend.toFloat()).coerceIn(0f, 1f) * height)
+                            if (index == 0) {
+                                currPath.moveTo(x, y)
+                                fillPath.moveTo(x, height)
+                                fillPath.lineTo(x, y)
+                            } else {
+                                currPath.lineTo(x, y)
+                                fillPath.lineTo(x, y)
+                            }
+                        }
+
+                        val lastPoint = currentCumulative.last()
+                        val lastX = ((lastPoint.first - 1).toFloat() / (days - 1).toFloat()) * width
+                        fillPath.lineTo(lastX, height)
+                        fillPath.close()
+
+                        // Gradient fill
+                        drawPath(
+                            path = fillPath,
+                            brush = Brush.verticalGradient(
+                                colors = listOf(Color(0xFF8E2DE2).copy(alpha = 0.25f), Color(0xFF8E2DE2).copy(alpha = 0.02f))
+                            )
+                        )
+
+                        // Line
+                        drawPath(
+                            path = currPath,
+                            color = Color(0xFF8E2DE2),
+                            style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round)
+                        )
+
+                        // Dot at latest current month data point
+                        val lastY = height - ((lastPoint.second.toFloat() / maxSpend.toFloat()).coerceIn(0f, 1f) * height)
+                        drawCircle(
+                            color = Color.White,
+                            radius = 5.dp.toPx(),
+                            center = Offset(lastX, lastY)
+                        )
+                        drawCircle(
+                            color = Color(0xFF8E2DE2),
+                            radius = 3.5.dp.toPx(),
+                            center = Offset(lastX, lastY)
+                        )
+                    }
                 }
-                drawPath(
-                    path = currPath,
-                    color = Color(0xFF8E2DE2),
-                    style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round)
-                )
+
+                Spacer(modifier = Modifier.height(4.dp))
+
+                // X-Axis Days of Month
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    val dayMarkers = listOf(1, 5, 10, 15, 20, 25, 30)
+                    dayMarkers.forEach { d ->
+                        Text(
+                            text = "$d",
+                            fontSize = 9.sp,
+                            color = MaterialTheme.colorScheme.outline,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
             }
         }
     }
+}
+
+private fun calculateNiceMax(rawMax: Double): Double {
+    if (rawMax <= 0.0) return 1000.0
+    val magnitude = Math.pow(10.0, Math.floor(Math.log10(rawMax)))
+    val factor = rawMax / magnitude
+    val niceFactor = when {
+        factor <= 1.0 -> 1.0
+        factor <= 2.0 -> 2.0
+        factor <= 2.5 -> 2.5
+        factor <= 5.0 -> 5.0
+        else -> 10.0
+    }
+    return niceFactor * magnitude
 }
 
 private fun computeCumulativeDays(transactions: List<TransactionWithDetails>): List<Pair<Int, Double>> {

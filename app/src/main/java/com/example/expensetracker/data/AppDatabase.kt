@@ -195,9 +195,7 @@ abstract class AppDatabase : RoomDatabase() {
         }
 
         private fun seedAccountsSql(db: SupportSQLiteDatabase) {
-            db.execSQL("INSERT OR IGNORE INTO `accounts` (`id`, `name`, `type`, `nickname`) VALUES (1, 'Primary Bank Account', 'BANK_ACCOUNT', NULL)")
-            db.execSQL("INSERT OR IGNORE INTO `accounts` (`id`, `name`, `type`, `nickname`) VALUES (2, 'Cash', 'CASH', NULL)")
-            db.execSQL("INSERT OR IGNORE INTO `accounts` (`id`, `name`, `type`, `nickname`) VALUES (3, 'Credit Card', 'CREDIT_CARD', NULL)")
+            // Only real user accounts or scanned SMS accounts are populated
         }
 
         fun getDatabase(context: Context): AppDatabase {
@@ -213,13 +211,11 @@ abstract class AppDatabase : RoomDatabase() {
                         override fun onCreate(db: SupportSQLiteDatabase) {
                             super.onCreate(db)
                             seedCategoriesSql(db)
-                            seedAccountsSql(db)
                         }
 
                         override fun onOpen(db: SupportSQLiteDatabase) {
                             super.onOpen(db)
                             seedCategoriesSql(db)
-                            seedAccountsSql(db)
                         }
                     })
                     .build()
@@ -250,23 +246,17 @@ abstract class AppDatabase : RoomDatabase() {
                     categoryDao.insertCategories(categories)
                 }
 
-                if (accountDao.getCount() == 0) {
-                    val accounts = listOf(
-                        Account(id = 1, name = "Primary Bank Account", type = AccountType.BANK_ACCOUNT),
-                        Account(id = 2, name = "Cash", type = AccountType.CASH),
-                        Account(id = 3, name = "Credit Card", type = AccountType.CREDIT_CARD)
-                    )
-                    accountDao.insertAccounts(accounts)
-                } else {
-                    // Reclassify existing misclassified card accounts
-                    val allAccounts = accountDao.getAllAccountsDirect()
-                    for (acc in allAccounts) {
-                        val lowerName = acc.name.lowercase(java.util.Locale.ROOT)
-                        if (acc.type == AccountType.BANK_ACCOUNT) {
-                            if (lowerName.contains("credit card") || lowerName.contains("card") || lowerName.contains(" cc")) {
-                                val newType = if (lowerName.contains("debit")) AccountType.DEBIT_CARD else AccountType.CREDIT_CARD
-                                accountDao.updateAccountTypeAndName(acc.id, newType, acc.name)
-                            }
+                // Clean up any previously auto-generated placeholder accounts with 0 transactions
+                accountDao.deleteUnusedDefaultAccounts()
+
+                // Reclassify existing misclassified card accounts
+                val allAccounts = accountDao.getAllAccountsDirect()
+                for (acc in allAccounts) {
+                    val lowerName = acc.name.lowercase(java.util.Locale.ROOT)
+                    if (acc.type == AccountType.BANK_ACCOUNT) {
+                        if (lowerName.contains("credit card") || lowerName.contains("card") || lowerName.contains(" cc")) {
+                            val newType = if (lowerName.contains("debit")) AccountType.DEBIT_CARD else AccountType.CREDIT_CARD
+                            accountDao.updateAccountTypeAndName(acc.id, newType, acc.name)
                         }
                     }
                 }

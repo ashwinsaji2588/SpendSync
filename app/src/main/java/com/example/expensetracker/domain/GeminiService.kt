@@ -29,7 +29,7 @@ class GeminiService(private val context: Context) {
         prefs.edit().putString(PREF_GEMINI_API_KEY, apiKey.trim()).apply()
     }
 
-    private fun getModel(modelName: String = "gemini-1.5-flash-latest"): GenerativeModel? {
+    private fun getModel(modelName: String = "gemini-2.0-flash"): GenerativeModel? {
         val apiKey = getApiKey()
         if (apiKey.isBlank()) return null
         return GenerativeModel(
@@ -58,7 +58,7 @@ class GeminiService(private val context: Context) {
             SMS: "$smsText"
         """.trimIndent()
 
-        val modelsToTry = listOf("gemini-1.5-flash-latest", "gemini-1.5-flash", "gemini-2.0-flash")
+        val modelsToTry = listOf("gemini-2.0-flash", "gemini-1.5-pro", "gemini-2.0-flash-lite", "gemini-1.5-flash-latest")
         for (modelName in modelsToTry) {
             try {
                 val model = GenerativeModel(modelName = modelName, apiKey = apiKey)
@@ -119,7 +119,7 @@ class GeminiService(private val context: Context) {
             Provide a helpful, actionable, concise, and friendly answer. Keep bullet points crisp.
         """.trimIndent()
 
-        val modelsToTry = listOf("gemini-1.5-flash-latest", "gemini-1.5-flash", "gemini-2.0-flash")
+        val modelsToTry = listOf("gemini-2.0-flash", "gemini-1.5-pro", "gemini-2.0-flash-lite", "gemini-1.5-flash-latest")
         var lastError: String? = null
         for (modelName in modelsToTry) {
             try {

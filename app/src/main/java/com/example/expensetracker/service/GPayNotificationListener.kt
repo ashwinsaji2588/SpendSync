@@ -6,6 +6,7 @@ import android.provider.Settings
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.util.Log
+import com.example.expensetracker.data.Account
 import com.example.expensetracker.data.AccountType
 import com.example.expensetracker.data.AppDatabase
 import com.example.expensetracker.data.Category
@@ -92,8 +93,8 @@ class GPayNotificationListener : NotificationListenerService() {
                             val categoryId = categoryDao.getCategoryByName("General")?.id
                                 ?: categoryDao.insertCategory(Category(name = "General"))
 
-                            val accountId = accountDao.getAccountByName("Primary Bank Account")?.id
-                                ?: (accountDao.getAllAccountsDirect()).firstOrNull()?.id ?: 1L
+                            val accountId = accountDao.getAllAccountsDirect().firstOrNull()?.id
+                                ?: accountDao.insertAccount(Account(name = "UPI Bank Account", type = AccountType.BANK_ACCOUNT))
 
                             val splitTransaction = TransactionEntity(
                                 amount = amount,

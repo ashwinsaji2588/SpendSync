@@ -60,6 +60,13 @@ interface AccountDao {
     @Query("DELETE FROM accounts WHERE id = :accountId")
     suspend fun deleteAccountById(accountId: Long)
 
+    @Query("""
+        DELETE FROM accounts 
+        WHERE name IN ('Primary Bank Account', 'Credit Card', 'Cash') 
+        AND id NOT IN (SELECT DISTINCT accountId FROM transactions)
+    """)
+    suspend fun deleteUnusedDefaultAccounts()
+
     @Query("SELECT COUNT(*) FROM transactions WHERE accountId = :accountId")
     suspend fun getTransactionCountForAccount(accountId: Long): Int
 
