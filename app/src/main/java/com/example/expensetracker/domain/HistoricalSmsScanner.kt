@@ -69,42 +69,53 @@ class HistoricalSmsScanner(
                     val date = if (dateIdx != -1) cursor.getLong(dateIdx) else System.currentTimeMillis()
 
                     if (parserEngine.isBankSender(address)) {
-                        var transaction = parserEngine.parseAndBuildTransaction(
-                            smsBody = body,
-                            senderId = address,
-                            timestamp = date,
-                            categoryRuleDao = categoryRuleDao,
-                            categoryDao = categoryDao,
-                            accountDao = accountDao
-                        )
+                        try {
+                            var transaction = parserEngine.parseAndBuildTransaction(
+                                smsBody = body,
+                                senderId = address,
+                                timestamp = date,
+                                categoryRuleDao = categoryRuleDao,
+                                categoryDao = categoryDao,
+                                accountDao = accountDao
+                            )
 
-                        // AI-Powered Fallback Parser for unclassified or obscure transactions
-                        if (transaction == null || transaction.merchantName.equals("Unknown Merchant", ignoreCase = true)) {
-                            val aiResult = geminiService.parseSmsWithAi(body)
-                            if (aiResult != null && aiResult.amount > 0) {
-                                val cat = categoryDao.getCategoryByName(aiResult.category)
-                                val catId = cat?.id ?: categoryDao.insertCategory(
-                                    com.example.expensetracker.data.Category(name = aiResult.category, colorHex = "#7E57C2")
-                                )
-                                val accId = accountDao.getAccountByName("Primary Bank Account")?.id
-                                    ?: (accountDao.getAllAccountsDirect().firstOrNull()?.id ?: 1L)
+                            // AI-Powered Fallback Parser for unclassified or obscure transactions (only if explicit financial keywords exist and API key is present)
+                            if ((transaction == null || transaction.merchantName.equals("Unknown Merchant", ignoreCase = true)) &&
+                                geminiService.getApiKey().isNotBlank() &&
+                                (body.contains("debited", ignoreCase = true) || body.contains("credited", ignoreCase = true) || body.contains("spent", ignoreCase = true))
+                            ) {
+                                try {
+                                    val aiResult = geminiService.parseSmsWithAi(body)
+                                    if (aiResult != null && aiResult.amount > 0) {
+                                        val cat = categoryDao.getCategoryByName(aiResult.category)
+                                        val catId = cat?.id ?: categoryDao.insertCategory(
+                                            com.example.expensetracker.data.Category(name = aiResult.category, colorHex = "#7E57C2")
+                                        )
+                                        val accId = accountDao.getAccountByName("Primary Bank Account")?.id
+                                            ?: (accountDao.getAllAccountsDirect().firstOrNull()?.id ?: 1L)
 
-                                transaction = TransactionEntity(
-                                    amount = aiResult.amount,
-                                    merchantName = aiResult.merchantName,
-                                    timestamp = date,
-                                    transactionType = aiResult.transactionType,
-                                    accountId = accId,
-                                    categoryId = if (catId > 0) catId else 7L,
-                                    isSplit = false,
-                                    reimbursementAmount = 0.0,
-                                    settled = false
-                                )
+                                        transaction = TransactionEntity(
+                                            amount = aiResult.amount,
+                                            merchantName = aiResult.merchantName,
+                                            timestamp = date,
+                                            transactionType = aiResult.transactionType,
+                                            accountId = accId,
+                                            categoryId = if (catId > 0) catId else (categoryDao.getCategoryByName("General")?.id ?: 1L),
+                                            isSplit = false,
+                                            reimbursementAmount = 0.0,
+                                            settled = false
+                                        )
+                                    }
+                                } catch (aiEx: Exception) {
+                                    Log.w(TAG, "AI fallback skipped for SMS: ${aiEx.message}")
+                                }
                             }
-                        }
 
-                        if (transaction != null) {
-                            parsedTransactions.add(transaction)
+                            if (transaction != null) {
+                                parsedTransactions.add(transaction)
+                            }
+                        } catch (itemEx: Exception) {
+                            Log.w(TAG, "Error parsing single SMS from $address: ${itemEx.message}")
                         }
                     }
                 } while (cursor.moveToNext())

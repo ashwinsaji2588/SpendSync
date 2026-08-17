@@ -417,21 +417,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             _isScanning.value = true
             _scanMessage.value = "Scanning SMS and reapplying category rules..."
+            var count = 0
+            var reclassifiedCount = 0
             try {
-                val count = smsScanner.scanInbox()
-                val reclassifiedCount = reapplyAllRulesToExistingTransactions()
-                prefs.edit().putBoolean(PREF_INITIAL_SCAN_DONE, true).apply()
-                _scanMessage.value = when {
-                    count > 0 && reclassifiedCount > 0 -> "Imported $count new txn(s) & updated $reclassifiedCount with your rules"
-                    count > 0 -> "Successfully imported $count transaction${if (count > 1) "s" else ""} from SMS inbox"
-                    reclassifiedCount > 0 -> "Refreshed & applied category rules across $reclassifiedCount transactions"
-                    else -> "All transactions up-to-date and rules applied"
-                }
+                count = smsScanner.scanInbox()
             } catch (e: Exception) {
-                _scanMessage.value = "Failed to scan SMS: ${e.localizedMessage}"
-            } finally {
-                _isScanning.value = false
+                android.util.Log.e("MainViewModel", "Error during SMS scan", e)
             }
+
+            try {
+                reclassifiedCount = reapplyAllRulesToExistingTransactions()
+                prefs.edit().putBoolean(PREF_INITIAL_SCAN_DONE, true).apply()
+            } catch (e: Exception) {
+                android.util.Log.e("MainViewModel", "Error reapplying rules", e)
+            }
+
+            _scanMessage.value = when {
+                count > 0 && reclassifiedCount > 0 -> "Imported $count new txn(s) & updated $reclassifiedCount with your rules"
+                count > 0 -> "Successfully imported $count transaction${if (count > 1) "s" else ""} from SMS inbox"
+                reclassifiedCount > 0 -> "Refreshed & applied category rules across $reclassifiedCount transactions"
+                else -> "All transactions up-to-date and rules applied"
+            }
+            _isScanning.value = false
         }
     }
 
